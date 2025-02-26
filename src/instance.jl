@@ -1,5 +1,11 @@
 using JSON, Dates
 
+Base.@kwdef struct Group
+    e::Vector{Int}
+    s::Int
+    c::Int
+end
+
 Base.@kwdef struct Instance
     Δ_l::Period
 
@@ -11,6 +17,7 @@ Base.@kwdef struct Instance
     n_m::Int
     n_d::Int
     n_w::Int
+    n_c::Int
 
     ξ::Int
     τ_lun::Int
@@ -44,6 +51,8 @@ Base.@kwdef struct Instance
     L::Vector{Set{Int}}
     V::Vector{Set{Int}}
     Z::Vector{Set{Int}}
+
+    groups::Vector{Group}
 end
 
 function read_instance(path::String)
@@ -57,6 +66,7 @@ function read_instance(path::String)
     n_s = length(dataset["subjects"])
     n_j = length(dataset["groups"])
     n_m = length(dataset["rooms"])
+    n_c = length(dataset["classes"])
 
     timeslots_start_datetime = Vector{DateTime}([])
     for (start_datetime_str, end_datetime_str) in dataset["general_parameters"]["exam_time_windows"]
@@ -200,6 +210,7 @@ function read_instance(path::String)
     λ = zeros(Bool, n_e, n_j)
     S = Vector{Set{Int}}([Set{Int}() for e in 1:n_e])
     J = Vector{Set{Int}}([Set{Int}() for s in 1:n_s])
+    groups = Vector{Group}()
     for (j, dict) in enumerate(dataset["groups"])
         s = dict["subject_id"]
 
@@ -210,6 +221,8 @@ function read_instance(path::String)
             λ[e, j] = true
             push!(S[e], s)
         end
+
+        push!(groups, Group(dict["examiner_ids"], s, dict["class_id"]))
     end
     σ = zeros(Bool, n_j, n_j)
     for e in 1:n_e
@@ -239,13 +252,14 @@ function read_instance(path::String)
 
     return Instance(;
         Δ_l,
-        n_i, n_e, n_s, n_j, n_l, n_m, n_d, n_w,
+        n_i, n_e, n_s, n_j, n_l, n_m, n_d, n_w, n_c,
         ξ, τ_lun, τ_room, τ_seq, τ_stu, τ_swi,
         ε, γ, θ,
         ζ, α, β, λ,
         η, ρ, μ, ν,
         κ, σ,
         δ,
-        S, U, J, L, V, Z
+        S, U, J, L, V, Z,
+        groups
     )
 end

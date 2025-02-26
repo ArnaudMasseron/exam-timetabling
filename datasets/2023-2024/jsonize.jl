@@ -13,6 +13,7 @@ subject_data = Dict{String, Dict{String, Any}}()
 room_data = Dict{String, Dict{String, Any}}()
 group_set = Set{Dict{String, Any}}()
 exam_set = Set{Dict{String, Any}}()
+class_data = Dict{String, Any}()
 
 time_step = Minute(15)
 
@@ -40,8 +41,9 @@ XLSX.openxlsx(exam_list_file) do workbook
         )
         class_acronym = students[1][1]
 
-        for (_, student_name) in students
+        for (student_class, student_name) in students
             student_data[(student_name, class_acronym)] = Dict{String, Any}()
+            class_data[student_class] = Dict{String, Any}()
         end
 
         for e in group_examiner_acronyms
@@ -133,6 +135,9 @@ end
 for (e, key) in enumerate(keys(examiner_data))
     examiner_data[key]["id"] = e
 end
+for (c, key) in enumerate(keys(class_data))
+    class_data[key]["id"] = c
+end
 
 group_array = collect(group_set)
 for j in 1:length(group_array)
@@ -162,7 +167,7 @@ dataset["students"] = Vector{Dict{String, Any}}([Dict{String, Any}() for i in 1:
 for ((student_name, class_acronym), value) in student_data
     dataset["students"][value["id"]] = Dict(
         "name" => student_name,
-        "class" => class_acronym,
+        "class_id" => class_data[class_acronym]["id"],
         "unavailabilities" => Vector{Tuple{DateTime, DateTime}}(),
     )
 end
@@ -201,8 +206,15 @@ for item in group_set
     dataset["groups"][item["id"]] = Dict(
         "examiner_ids" => Set([examiner_data[acronym]["id"] for acronym in item["examiner_acronyms"]]),
         "subject_id" => subject_data[item["subject_acronym"]]["id"],
-        "class_acronym" => item["class_acronym"],
+        "class_id" => class_data[item["class_acronym"]]["id"],
         "max_number_days" => 5
+    )
+end
+
+dataset["classes"] = Vector{Dict{String, Any}}([Dict{String, Any}() for j in 1:length(class_data)])
+for (key, value) in class_data
+    dataset["classes"][value["id"]] = Dict(
+        "acronym" => key
     )
 end
 
