@@ -48,7 +48,7 @@ Base.@kwdef struct Instance
     S::Vector{Set{Int}}
     U::Vector{Vector{Vector{Int}}}
     J::Vector{Set{Int}}
-    L::Vector{Set{Int}}
+    L::Vector{Vector{Int}}
     V::Vector{Set{Int}}
     Z::Vector{Set{Int}}
 
@@ -101,20 +101,20 @@ function read_instance(path::String)
     end
     n_l = length(timeslots_start_datetime)
 
-    L = Vector{Set{Int}}([Set{Int}()])
+    L = Vector{Vector{Int}}([Vector{Int}()])
     V = Vector{Set{Int}}([Set{Int}()])
     Z = Vector{Set{Int}}([Set{Int}()])
     day = Date(timeslots_start_datetime[1])
-    week_start = timeslots_start_datetime[1] - Day(dayofweek(timeslots_start_datetime[1]) - 1)
+    week_start = Date(timeslots_start_datetime[1] - Day(dayofweek(timeslots_start_datetime[1]) - 1))
     for (l, datetime) in enumerate(timeslots_start_datetime)
         if Date(datetime) != day
-            push!(L, Set{Int}())
+            push!(L, Vector{Int}())
             push!(V, Set{Int}())
             day = Date(datetime)
         end
-        if datetime - Day(dayofweek(datetime) - 1) != week_start
+        if Date(datetime - Day(dayofweek(datetime) - 1)) != week_start
             push!(Z, Set{Int}())
-            week_start = datetime - Day(dayofweek(datetime) - 1)
+            week_start = Date(datetime - Day(dayofweek(datetime) - 1))
         end
 
         push!(L[end], l)
@@ -180,12 +180,16 @@ function read_instance(path::String)
         for (start_datetime_str, end_datetime_str) in dict["soft_unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
-            push!(U[e], [])
+            new_entry_added = false
 
             curr_datetime = start_datetime
             while (curr_datetime < end_datetime)
                 l = searchsortedlast(timeslots_start_datetime, curr_datetime)
                 if l != 0
+                    if !new_entry_added
+                        push!(U[e], [])
+                        new_entry_added = true
+                    end
                     β[e, l] = false
                     push!(U[e][end], l)
                 end
@@ -233,7 +237,7 @@ function read_instance(path::String)
         end
     end
 
-    δ = zeros(Bool, n_m, n_l)
+    δ = ones(Bool, n_m, n_l)
     for (m, dict) in enumerate(dataset["rooms"])
         for (start_datetime_str, end_datetime_str) in dict["unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
