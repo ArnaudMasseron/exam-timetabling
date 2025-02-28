@@ -11,8 +11,7 @@ function declare_CM(model::Model, I::Instance)
         if !RHS
             # All the individual variables are set to 0 so that the presolve routine easily removes those variables
             for j=I.J[s], m=1:I.n_m
-                cons = @constraint(model, x[i, j, l, m] == 0)
-                set_name(cons, "student_unavailability (i=$i, s=$s, d=$d, l=$l, j=$j, m=$m)")
+                fix(x[i,j,l,m], 0; force=true)
             end
         else
             LHS = zero(AffExpr)
@@ -36,25 +35,27 @@ function declare_CM(model::Model, I::Instance)
     end
 
     # Student one exam 2
-    μ_max = maximum(I.μ)
-    for i=1:I.n_i, s=1:I.n_s, d=1:I.n_d, l=I.L[d]
-        LHS = zero(AffExpr)
-        for u=1:I.n_s, k=I.J[u], m=1:I.n_m
-            a = I.ν[s]-1 + I.τ_stu + I.μ[u]
-            for t=1:min(a, I.L[d][end]-l)
-                add_to_expression!(LHS, x[i, k, l+t, m])
+    for s=1:I.n_s, i=1:I.n_i 
+        M = I.ν[s]-1 + I.τ_stu + maximum([I.μ[s_tilde] for s_tilde=I.S_stu[i]])
+
+        for d=1:I.n_d, l=I.L[d]
+            LHS = zero(AffExpr)
+            for u=1:I.n_s
+                a = I.ν[s]-1 + I.τ_stu + I.μ[u]
+                for k=I.J[u], m=1:I.n_m, t=1:min(a, I.L[d][end]-l)
+                    add_to_expression!(LHS, x[i, k, l+t, m])
+                end
             end
-        end
 
-        M = I.ν[s]-1 + I.τ_stu + μ_max
-        RHS = zero(AffExpr)
-        for j=I.J[s], m=1:I.n_m
-            add_to_expression!(LHS, x[i, j, l, m])
-        end
-        RHS = M * (1 - RHS)
+            RHS = zero(AffExpr)
+            for j=I.J[s], m=1:I.n_m
+                add_to_expression!(LHS, x[i, j, l, m])
+            end
+            RHS = M * (1 - RHS)
 
-        cons = @constraint(model, LHS <= RHS)
-        set_name(cons, "student_one_exam_2 (i=$i, s=$s, d=$d, l=$l)")
+            cons = @constraint(model, LHS <= RHS)
+            set_name(cons, "student_one_exam_2 (i=$i, s=$s, d=$d, l=$l)")
+        end
     end
 
     # Student max exams
@@ -93,7 +94,7 @@ function declare_CM(model::Model, I::Instance)
         
         if one_alpha_null
             for i=1:I.n_i, m=1:I.n_m
-                @constraint(model, x[i, j, l, m] == 0)
+                fix(x[i,j,l,m], 0; force=true)
             end
         else
             LHS = zero(AffExpr)
@@ -152,7 +153,7 @@ function declare_CM(model::Model, I::Instance)
     # Examiner lunch break 1
     @variable(model, t[e=1:I.n_e, 1:I.n_l], binary=true)
     for e=1:I.n_e, 
-        M = sum(I.λ[e, :]) * (maximum([I.μ[s] for s=I.S[e]]) + maximum([I.ν[s] for s=I.S[e]]) + I.τ_lun - 1)
+        M = sum(I.λ[e, :]) * (maximum([I.μ[s] for s=I.S_ex[e]]) + maximum([I.ν[s] for s=I.S_ex[e]]) + I.τ_lun - 1)
 
         for d=1:I.n_d, l=I.V[d]
             LHS = zero(AffExpr)
@@ -309,8 +310,7 @@ function declare_CM(model::Model, I::Instance)
         if !RHS
             # All the individual variables are set to 0 so that the presolve routine easily removes those variables
             for i=1:I.n_i, j=I.J[s]
-                cons = @constraint(model, x[i, j, l, m] == 0)
-                set_name(cons, "room_unavailability (s=$s, m=$m, d=$d, l=$l, i=$i, j=$j)")
+                fix(x[i,j,l,m], 0; force=true)
             end
         else
             LHS = zero(AffExpr)
@@ -355,8 +355,7 @@ function declare_CM(model::Model, I::Instance)
     for i=1:I.n_i, j=1:I.n_j
         if !I.γ[i, j]
             for l=1:I.n_l, m=1:I.n_m
-                cons = @constraint(model, x[i, j, l, m] == 0)
-                set_name(cons, "exam_not_needed (i=$i, j=$j, l=$l, m=$m)")
+                fix(x[i,j,l,m], 0; force=true)
             end
         else
             LHS = zero(AffExpr)
@@ -383,14 +382,12 @@ function declare_CM(model::Model, I::Instance)
 
     # Exam start
     for s=1:I.n_s, d=1:I.n_d, l=I.L[d][1:I.μ[s]], i=1:I.n_i, j=I.J[s], m=1:I.n_m
-        cons = @constraint(model, x[i, j, l, m] == 0)
-        set_name(cons, "exam_start (s=$s, d=$d, l=$l, i=$i, j=$j, m=$m)")
+        fix(x[i,j,l,m], 0; force=true)
     end
 
     # Exam end
     for s=1:I.n_s, d=1:I.n_d, l=I.L[d][end-I.ν[s]-1:end], i=1:I.n_i, j=I.J[s], m=1:I.n_m
-        cons = @constraint(model, x[i, j, l, m] == 0)
-        set_name(cons, "exam_end (s=$s, d=$d, l=$l, i=$i, j=$j, m=$m)")
+        fix(x[i,j,l,m], 0; force=true)
     end
 
     # Exam continuity 3
@@ -528,7 +525,7 @@ function declare_CM(model::Model, I::Instance)
         add_to_expression!(Rr_sum, R[j, d] - r[j, d])
     end
 
-    #objective = y_coef * y_sum + q_coef * q_sum + w_coef * w_sum + z_coef * z_sum + Rr_coef * Rr_sum
+    objective = y_coef * y_sum + q_coef * q_sum + w_coef * w_sum + z_coef * z_sum + Rr_coef * Rr_sum
 
     @objective(model, Min, 0)
 end
