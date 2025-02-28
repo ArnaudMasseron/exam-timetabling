@@ -45,7 +45,8 @@ Base.@kwdef struct Instance
     
     δ::Matrix{Bool}
 
-    S::Vector{Set{Int}}
+    S_ex::Vector{Set{Int}}
+    S_stu::Vector{Set{Int}}
     U::Vector{Vector{Vector{Int}}}
     J::Vector{Set{Int}}
     L::Vector{Vector{Int}}
@@ -135,8 +136,10 @@ function read_instance(path::String)
     τ_swi = dataset["general_parameters"]["group_switch_break_duration"]
 
     γ = zeros(Bool, n_i, n_j)
+    S_stu = Vector{Set{Int}}([Set{Int}() for i in 1:n_i])
     for item in dataset["exams"]
         γ[item["student_id"], item["group_id"]] = true
+        push!(S_stu[item["student_id"]], dataset["groups"][item["group_id"]]["subject_id"])
     end
     ε = vec(sum(γ, dims=2))
     θ = ones(Bool, n_i, n_l)
@@ -212,7 +215,7 @@ function read_instance(path::String)
 
     κ = -ones(Int, n_j)
     λ = zeros(Bool, n_e, n_j)
-    S = Vector{Set{Int}}([Set{Int}() for e in 1:n_e])
+    S_ex = Vector{Set{Int}}([Set{Int}() for e in 1:n_e])
     J = Vector{Set{Int}}([Set{Int}() for s in 1:n_s])
     groups = Vector{Group}()
     for (j, dict) in enumerate(dataset["groups"])
@@ -223,7 +226,7 @@ function read_instance(path::String)
 
         for e in dict["examiner_ids"]
             λ[e, j] = true
-            push!(S[e], s)
+            push!(S_ex[e], s)
         end
 
         push!(groups, Group(dict["examiner_ids"], s, dict["class_id"]))
@@ -263,7 +266,7 @@ function read_instance(path::String)
         η, ρ, μ, ν,
         κ, σ,
         δ,
-        S, U, J, L, V, Z,
+        S_ex, S_stu, U, J, L, V, Z,
         groups
     )
 end
