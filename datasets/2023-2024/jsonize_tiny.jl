@@ -24,6 +24,10 @@ XLSX.openxlsx(exam_list_file) do workbook
 
     row_number = 2
     for row in XLSX.eachtablerow(sheet)
+        if row_number > 13
+            break
+        end
+
         group_examiner_acronyms = split(row[Symbol("Sigles expert et examinateur")], ", ")
         subject_acronym = split(row[Symbol("Nom de l'examen")], " ")[1]
         subject_duration = Minute.(sum(parse.(Int, (split(row[Symbol("Durée de l'examen")], "h"))) .* [60, 1])) / time_step
@@ -116,9 +120,16 @@ XLSX.openxlsx(room_file) do workbook
     sheet_name = XLSX.sheetnames(workbook)[1]
     sheet = workbook[sheet_name]
 
+    row_number = 2
     for row in XLSX.eachtablerow(sheet)
+        if row_number > 5
+            break
+        end
+
         room_acronym = row[:Code]
         room_data[room_acronym] = Dict{String, Any}()
+
+        row_number += 1
     end
 end
 
@@ -159,7 +170,7 @@ dataset["general_parameters"]["student_break_duration"] = 4
 dataset["general_parameters"]["group_switch_break_duration"] = 2
 dataset["general_parameters"]["exam_time_windows"] = Vector{Tuple{DateTime, DateTime}}([
     (DateTime(2024, 6, 17 + k, 8), DateTime(2024, 6, 17 + k, 20))
-    for k in 0:12 if k!= 6
+    for k in 0:5
 ])
 dataset["general_parameters"]["lunch_time_window"] = Tuple{Time, Time}((Time("11:30am", "HH:MMp"), Time("01pm", "HHp")))
 
@@ -246,6 +257,6 @@ end
 # Save the dataset in a JSON file
 using JSON
 save_dir = "/home/arnaud/Documents/UNIFR/travail/exam-timetabling/datasets/2023-2024/"
-open(save_dir * "2023-2024_dataset.json", "w") do file
+open(save_dir * "2023-2024_dataset_tiny.json", "w") do file
     JSON.print(file, dataset, 2)
 end
