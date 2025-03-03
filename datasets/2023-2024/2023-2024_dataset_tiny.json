@@ -2,18 +2,22 @@
   "rooms": [
     {
       "unavailabilities": [],
+      "unsuported_subjects": [],
       "acronym": "000"
     },
     {
       "unavailabilities": [],
+      "unsuported_subjects": [],
       "acronym": "001"
     },
     {
       "unavailabilities": [],
+      "unsuported_subjects": [],
       "acronym": "006"
     },
     {
       "unavailabilities": [],
+      "unsuported_subjects": [],
       "acronym": "002"
     }
   ],

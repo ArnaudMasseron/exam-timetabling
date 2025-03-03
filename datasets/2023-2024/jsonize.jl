@@ -197,7 +197,8 @@ dataset["rooms"] = Vector{Dict{String, Any}}([Dict{String, Any}() for j in 1:len
 for (key, value) in room_data
     dataset["rooms"][value["id"]] = Dict(
         "acronym" => key,
-        "unavailabilities" => Vector{Tuple{DateTime, DateTime}}()
+        "unavailabilities" => Vector{Tuple{DateTime, DateTime}}(),
+        "unsuported_subjects" => Vector{Int}()
     )
 end
 

@@ -43,7 +43,7 @@ Base.@kwdef struct Instance
     κ::Vector{Int}
     σ::Matrix{Bool}
     
-    δ::Matrix{Bool}
+    δ::Array{Bool, 3}
 
     S_ex::Vector{Set{Int}}
     S_stu::Vector{Set{Int}}
@@ -240,8 +240,12 @@ function read_instance(path::String)
         end
     end
 
-    δ = ones(Bool, n_m, n_l)
+    δ = ones(Bool, n_m, n_l, n_s)
     for (m, dict) in enumerate(dataset["rooms"])
+        for s in dict["unsuported_subjects"], l in 1:n_l
+            δ[m, l, s] = false
+        end
+
         for (start_datetime_str, end_datetime_str) in dict["unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
@@ -250,7 +254,9 @@ function read_instance(path::String)
             while (curr_datetime < end_datetime)
                 l = searchsortedlast(timeslots_start_datetime, curr_datetime)
                 if l != 0
-                    δ[m, l] = false
+                    for s=1:n_s
+                        δ[m, l, s] = false
+                    end
                 end
                 curr_datetime += Δ_l
             end
