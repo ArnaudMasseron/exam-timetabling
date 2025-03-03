@@ -301,11 +301,40 @@ function declare_CM(model::Model, I::Instance)
         end
     end
 
+    # Exam grouped
+    @variable(model, r[j=1:I.n_j, d=1:I.n_d])
+    @variable(model, R[j=1:I.n_j, d=1:I.n_d])
+    for s=1:I.n_s, j=I.J[s], d=1:I.n_d
+        cons = @constraint(model, r[j, d] >= I.L[d][1])
+        set_name(cons, "exam_grouped_3_1 (s=$s, j=$j, d=$d)")
+
+        cons = @constraint(model, r[j, d] <= R[j, d])
+        set_name(cons, "exam_grouped_3_2 (s=$s, j=$j, d=$d)")
+        
+        cons = @constraint(model, R[j, d] <= I.L[d][end])
+        set_name(cons, "exam_grouped_3_3 (s=$s, j=$j, d=$d)")
+        
+        for l=I.L[d]
+            expr = zero(AffExpr)
+            for i=1:I.n_i, m=1:I.n_m
+                add_to_expression!(expr, x[i, j, l, m])
+            end
+
+            RHS = l + (I.L[d][end] - l) * (1 - expr / I.η[s])
+            cons = @constraint(model, r[j, d] <= RHS)
+            set_name(cons, "exam_grouped_1 (s=$s, j=$j, d=$d, l=$l")
+
+            RHS = l + (I.L[d][1] - l) * (1 - expr / I.η[s])
+            cons = @constraint(model, R[j, d] >= RHS)
+            set_name(cons, "exam_grouped_2 (s=$s, j=$j, d=$d, l=$l)")
+        end
+    end
+
 
     # --- Room related constraints --- #
     # Room availability
     for s=1:I.n_s, m=1:I.n_m, d=1:I.n_d, l=I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
-        RHS = prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
+        RHS = prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1, s])
 
         if !RHS
             # All the individual variables are set to 0 so that the presolve routine easily removes those variables
@@ -461,35 +490,6 @@ function declare_CM(model::Model, I::Instance)
 
             cons = @constraint(model, LHS <= RHS)
             set_name(cons, "exam_break (s=$s, j=$j, d=$d, l=$l)")
-        end
-    end
-
-    # Exam grouped
-    @variable(model, r[j=1:I.n_j, d=1:I.n_d])
-    @variable(model, R[j=1:I.n_j, d=1:I.n_d])
-    for s=1:I.n_s, j=I.J[s], d=1:I.n_d
-        cons = @constraint(model, r[j, d] >= I.L[d][1])
-        set_name(cons, "exam_grouped_3_1 (s=$s, j=$j, d=$d)")
-
-        cons = @constraint(model, r[j, d] <= R[j, d])
-        set_name(cons, "exam_grouped_3_2 (s=$s, j=$j, d=$d)")
-        
-        cons = @constraint(model, R[j, d] <= I.L[d][end])
-        set_name(cons, "exam_grouped_3_3 (s=$s, j=$j, d=$d)")
-        
-        for l=I.L[d]
-            expr = zero(AffExpr)
-            for i=1:I.n_i, m=1:I.n_m
-                add_to_expression!(expr, x[i, j, l, m])
-            end
-
-            RHS = l + (I.L[d][end] - l) * (1 - expr / I.η[s])
-            cons = @constraint(model, r[j, d] <= RHS)
-            set_name(cons, "exam_grouped_1 (s=$s, j=$j, d=$d, l=$l")
-
-            RHS = l + (I.L[d][1] - l) * (1 - expr / I.η[s])
-            cons = @constraint(model, R[j, d] >= RHS)
-            set_name(cons, "exam_grouped_2 (s=$s, j=$j, d=$d, l=$l)")
         end
     end
 
