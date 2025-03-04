@@ -112,8 +112,7 @@ function declare_CM(model::Model, I::Instance)
     # Remove useless q
     for e=1:I.n_e, l=1:I.n_l
         if !I.α[e, l] || I.β[e, l]
-            cons = @constraint(model, q[e, l] == 0)
-            set_name(cons, "remove_useless_q (e=$e, l=$l)")
+            fix(q[e, l], 0; force=true)
         end
     end
 
@@ -191,8 +190,7 @@ function declare_CM(model::Model, I::Instance)
     for d=1:I.n_d, l=I.L[d]
         if !(l in I.V[d])
             for e=1:I.n_e
-                cons = @constraint(model, t[e, l] == 0)
-                set_name(cons, "remove_useless_t (d=$d, l=$l, e=$e)")
+                fix(t[e, l], 0; force=true)
             end
         end
     end
