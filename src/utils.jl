@@ -1,4 +1,4 @@
-function print_constraint_conflicts(model::Model, name_only::Bool=false)
+function print_constraint_conflicts(model::Model, name_only::Bool = false)
     compute_conflict!(model)  # Compute IIS
 
     # Check all constraints (including variable bounds)

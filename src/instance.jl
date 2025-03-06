@@ -42,8 +42,8 @@ Base.@kwdef struct Instance
 
     κ::Vector{Int}
     σ::Matrix{Bool}
-    
-    δ::Array{Bool, 3}
+
+    δ::Array{Bool,3}
 
     S_ex::Vector{Set{Int}}
     S_stu::Vector{Set{Int}}
@@ -70,7 +70,8 @@ function read_instance(path::String)
     n_c = length(dataset["classes"])
 
     timeslots_start_datetime = Vector{DateTime}([])
-    for (start_datetime_str, end_datetime_str) in dataset["general_parameters"]["exam_time_windows"]
+    for (start_datetime_str, end_datetime_str) in
+        dataset["general_parameters"]["exam_time_windows"]
         start_datetime = DateTime(start_datetime_str)
         end_datetime = DateTime(end_datetime_str)
 
@@ -94,7 +95,7 @@ function read_instance(path::String)
         end
     end
     sort(timeslots_start_datetime)
-    for a in 1:length(timeslots_start_datetime)-1
+    for a = 1:length(timeslots_start_datetime)-1
         @assert(
             timeslots_start_datetime[a+1] - timeslots_start_datetime[a] >= Δ_l,
             "BAD DATASET: There must be no duplicates in the exam time windows"
@@ -106,7 +107,8 @@ function read_instance(path::String)
     V = Vector{Set{Int}}([Set{Int}()])
     Z = Vector{Set{Int}}([Set{Int}()])
     day = Date(timeslots_start_datetime[1])
-    week_start = Date(timeslots_start_datetime[1] - Day(dayofweek(timeslots_start_datetime[1]) - 1))
+    week_start =
+        Date(timeslots_start_datetime[1] - Day(dayofweek(timeslots_start_datetime[1]) - 1))
     for (l, datetime) in enumerate(timeslots_start_datetime)
         if Date(datetime) != day
             push!(L, Vector{Int}())
@@ -120,8 +122,10 @@ function read_instance(path::String)
 
         push!(L[end], l)
         push!(Z[end], l)
-        if (Time(dataset["general_parameters"]["lunch_time_window"][1]) <= Time(datetime) &&
-            Time(dataset["general_parameters"]["lunch_time_window"][2]) > Time(datetime))
+        if (
+            Time(dataset["general_parameters"]["lunch_time_window"][1]) <= Time(datetime) &&
+            Time(dataset["general_parameters"]["lunch_time_window"][2]) > Time(datetime)
+        )
             push!(V[end], l)
         end
     end
@@ -136,12 +140,12 @@ function read_instance(path::String)
     τ_swi = dataset["general_parameters"]["group_switch_break_duration"]
 
     γ = zeros(Bool, n_i, n_j)
-    S_stu = Vector{Set{Int}}([Set{Int}() for i in 1:n_i])
+    S_stu = Vector{Set{Int}}([Set{Int}() for i = 1:n_i])
     for item in dataset["exams"]
         γ[item["student_id"], item["group_id"]] = true
         push!(S_stu[item["student_id"]], dataset["groups"][item["group_id"]]["subject_id"])
     end
-    ε = vec(sum(γ, dims=2))
+    ε = vec(sum(γ, dims = 2))
     θ = ones(Bool, n_i, n_l)
     for (i, dict) in enumerate(dataset["students"])
         for (start_datetime_str, end_datetime_str) in dict["unavailabilities"]
@@ -162,7 +166,7 @@ function read_instance(path::String)
     ζ = zeros(Int, n_e)
     α = ones(Bool, n_e, n_l)
     β = ones(Bool, n_e, n_l)
-    U = Vector{Vector{Vector{Int}}}([Vector{Vector{Int}}() for e in 1:n_e])
+    U = Vector{Vector{Vector{Int}}}([Vector{Vector{Int}}() for e = 1:n_e])
     for (e, dict) in enumerate(dataset["examiners"])
         ζ[e] = dict["max_number_exams_per_day"]
 
@@ -215,8 +219,8 @@ function read_instance(path::String)
 
     κ = -ones(Int, n_j)
     λ = zeros(Bool, n_e, n_j)
-    S_ex = Vector{Set{Int}}([Set{Int}() for e in 1:n_e])
-    J = Vector{Set{Int}}([Set{Int}() for s in 1:n_s])
+    S_ex = Vector{Set{Int}}([Set{Int}() for e = 1:n_e])
+    J = Vector{Set{Int}}([Set{Int}() for s = 1:n_s])
     groups = Vector{Group}()
     for (j, dict) in enumerate(dataset["groups"])
         s = dict["subject_id"]
@@ -232,8 +236,8 @@ function read_instance(path::String)
         push!(groups, Group(dict["examiner_ids"], s, dict["class_id"]))
     end
     σ = zeros(Bool, n_j, n_j)
-    for e in 1:n_e
-        group_ids = findall(x->x, λ[e, :])
+    for e = 1:n_e
+        group_ids = findall(x -> x, λ[e, :])
 
         for j in group_ids, k in group_ids
             σ[j, k] = true
@@ -242,7 +246,7 @@ function read_instance(path::String)
 
     δ = ones(Bool, n_m, n_l, n_s)
     for (m, dict) in enumerate(dataset["rooms"])
-        for s in dict["unsuported_subjects"], l in 1:n_l
+        for s in dict["unsuported_subjects"], l = 1:n_l
             δ[m, l, s] = false
         end
 
@@ -254,7 +258,7 @@ function read_instance(path::String)
             while (curr_datetime < end_datetime)
                 l = searchsortedlast(timeslots_start_datetime, curr_datetime)
                 if l != 0
-                    for s=1:n_s
+                    for s = 1:n_s
                         δ[m, l, s] = false
                     end
                 end
@@ -265,14 +269,42 @@ function read_instance(path::String)
 
     return Instance(;
         Δ_l,
-        n_i, n_e, n_s, n_j, n_l, n_m, n_d, n_w, n_c,
-        ξ, τ_lun, τ_room, τ_seq, τ_stu, τ_swi,
-        ε, γ, θ,
-        ζ, α, β, λ,
-        η, ρ, μ, ν,
-        κ, σ,
+        n_i,
+        n_e,
+        n_s,
+        n_j,
+        n_l,
+        n_m,
+        n_d,
+        n_w,
+        n_c,
+        ξ,
+        τ_lun,
+        τ_room,
+        τ_seq,
+        τ_stu,
+        τ_swi,
+        ε,
+        γ,
+        θ,
+        ζ,
+        α,
+        β,
+        λ,
+        η,
+        ρ,
+        μ,
+        ν,
+        κ,
+        σ,
         δ,
-        S_ex, S_stu, U, J, L, V, Z,
-        groups
+        S_ex,
+        S_stu,
+        U,
+        J,
+        L,
+        V,
+        Z,
+        groups,
     )
 end
