@@ -13,6 +13,6 @@ instance_path = dir_path * "/datasets/2023-2024/2023-2024_dataset_tiny.json"
 instance = read_instance(instance_path)
 
 model = Model(Gurobi.Optimizer)
-@time declare_CM(model, instance)
+@time declare_DSE_jl(model, instance)
 
 optimize!(model)
