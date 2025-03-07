@@ -22,9 +22,13 @@ XLSX.openxlsx(exam_list_file) do workbook
     sheet_name = XLSX.sheetnames(workbook)[1]
     sheet = workbook[sheet_name]
 
+    selected_rows = [2, 3, 4, 8, 9]
     row_number = 2
     for row in XLSX.eachtablerow(sheet)
-        if row_number > 13
+        if !(row_number in selected_rows)
+            row_number += 1
+            continue
+        elseif row_number > selected_rows[end]
             break
         end
 
@@ -35,6 +39,10 @@ XLSX.openxlsx(exam_list_file) do workbook
                 sum(parse.(Int, (split(row[Symbol("Durée de l'examen")], "h"))) .* [60, 1])
             ) / time_step
         students = split.(split(row[Symbol("Nom de l'étudiant_classe")], ", "), "_") #students[i] = (class, student name)
+
+        if 2 <= row_number <= 3
+            push!(students, ["4GY2", "dummy_name"])
+        end
 
         @assert(
             prod(isinteger.(subject_duration)),
@@ -171,16 +179,16 @@ dataset = Dict{String,Any}()
 dataset["general_parameters"] = Dict{String,Any}()
 dataset["general_parameters"]["time_slot_length_minutes"] = time_step.value
 dataset["general_parameters"]["max_number_exams_student"] = 1
-dataset["general_parameters"]["lunch_break_duration"] = 4
+dataset["general_parameters"]["lunch_break_duration"] = 3
 dataset["general_parameters"]["room_break_duration"] = 2
 dataset["general_parameters"]["exam_sequence_break_duration"] = 2
-dataset["general_parameters"]["student_break_duration"] = 4
+dataset["general_parameters"]["student_break_duration"] = 3
 dataset["general_parameters"]["group_switch_break_duration"] = 2
 dataset["general_parameters"]["exam_time_windows"] = Vector{Tuple{DateTime,DateTime}}([
-    (DateTime(2024, 6, 17 + k, 8), DateTime(2024, 6, 17 + k, 20)) for k = 0:5
+    (DateTime(2024, 6, 17 + k, 10, 30), DateTime(2024, 6, 17 + k, 14, 30)) for k = 0:2
 ])
 dataset["general_parameters"]["lunch_time_window"] =
-    Tuple{Time,Time}((Time("11:30am", "HH:MMp"), Time("01pm", "HHp")))
+    Tuple{Time,Time}((Time("11:30am", "HH:MMp"), Time("12pm", "HHp")))
 
 dataset["students"] =
     Vector{Dict{String,Any}}([Dict{String,Any}() for i = 1:length(student_data)])
