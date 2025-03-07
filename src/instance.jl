@@ -48,7 +48,7 @@ Base.@kwdef struct Instance
     U::Vector{Vector{Vector{Int}}}
     J::Vector{Set{Int}}
     L::Vector{Vector{Int}}
-    V::Vector{Set{Int}}
+    V::Vector{Vector{Int}}
     Z::Vector{Set{Int}}
 
     groups::Vector{Group}
@@ -102,7 +102,7 @@ function read_instance(path::String)
     n_l = length(timeslots_start_datetime)
 
     L = Vector{Vector{Int}}([Vector{Int}()])
-    V = Vector{Set{Int}}([Set{Int}()])
+    V = Vector{Vector{Int}}([Vector{Int}()])
     Z = Vector{Set{Int}}([Set{Int}()])
     day = Date(timeslots_start_datetime[1])
     week_start =
@@ -110,7 +110,7 @@ function read_instance(path::String)
     for (l, datetime) in enumerate(timeslots_start_datetime)
         if Date(datetime) != day
             push!(L, Vector{Int}())
-            push!(V, Set{Int}())
+            push!(V, Vector{Int}())
             day = Date(datetime)
         end
         if Date(datetime - Day(dayofweek(datetime) - 1)) != week_start
@@ -188,7 +188,7 @@ function read_instance(path::String)
             curr_datetime = start_datetime
             while (curr_datetime < end_datetime)
                 l = searchsortedlast(timeslots_start_datetime, curr_datetime)
-                if l != 0
+                if l != 0 && curr_datetime - timeslots_start_datetime[l] < Δ_l
                     if !new_entry_added
                         push!(U[e], [])
                         new_entry_added = true
