@@ -1,8 +1,6 @@
 # Load packages
 using JuMP
 using Gurobi
-ENV["GUROBI_HOME"] = "/opt/gurobi1201/linux64"
-ENV["GRB_LICENSE_FILE"] = "/home/arnaud/.gurobi/license/gurobi.lic"
 
 # Load source files
 repo_path = String(@__DIR__) * "/../"
