@@ -81,7 +81,7 @@
     {
       "duration_time": 1,
       "max_number_exams_row": 6,
-      "preparation_time": 1,
+      "preparation_time": 2,
       "number_of_students": 2,
       "acronym": "EXA-MA"
     },
@@ -100,7 +100,7 @@
       "acronym": "EXA-GEO"
     },
     {
-      "duration_time": 1,
+      "duration_time": 2,
       "max_number_exams_row": 6,
       "preparation_time": 1,
       "number_of_students": 1,

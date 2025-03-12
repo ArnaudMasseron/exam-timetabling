@@ -49,6 +49,9 @@ XLSX.openxlsx(exam_list_file) do workbook
             "BAD PARAMETER: The time must be discretizable into whole time_step long time slots"
         )
         subject_duration = Int.(subject_duration)
+        if row_number == 8
+            subject_duration = 2
+        end
 
         @assert(
             prod([students[i][1] == students[i+1][1] for i = 1:length(students)-1]),
@@ -217,7 +220,7 @@ dataset["subjects"] =
 for (key, value) in subject_data
     dataset["subjects"][value["id"]] = Dict(
         "acronym" => key,
-        "preparation_time" => 1,
+        "preparation_time" => key == "EXA-MA" ? 2 : 1,
         "duration_time" => value["duration_time"],
         "number_of_students" => value["number_of_students"],
         "max_number_exams_row" => 6,
