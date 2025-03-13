@@ -45,6 +45,8 @@ Base.@kwdef struct Instance
 
     δ::Array{Bool,3}
 
+    S_exa::Vector{Set{Int}}
+    S_stu::Vector{Set{Int}}
     U::Vector{Vector{Vector{Int}}}
     J::Vector{Set{Int}}
     L::Vector{Vector{Int}}
@@ -141,6 +143,12 @@ function read_instance(path::String)
     for item in dataset["exams"]
         γ[item["student_id"], item["group_id"]] = true
     end
+    S_stu = [Set{Int}() for i = 1:n_i]
+    for i = 1:n_i, j = 1:n_j
+        if γ[i, j]
+            push!(S_stu[i], dataset["groups"][j]["subject_id"])
+        end
+    end
     ε = vec(sum(γ, dims = 2))
     θ = ones(Bool, n_i, n_l)
     for (i, dict) in enumerate(dataset["students"])
@@ -217,6 +225,7 @@ function read_instance(path::String)
     λ = zeros(Bool, n_e, n_j)
     J = Vector{Set{Int}}([Set{Int}() for s = 1:n_s])
     groups = Vector{Group}()
+    S_exa = [Set{Int}() for e = 1:n_e]
     for (j, dict) in enumerate(dataset["groups"])
         s = dict["subject_id"]
 
@@ -225,6 +234,7 @@ function read_instance(path::String)
 
         for e in dict["examiner_ids"]
             λ[e, j] = true
+            push!(S_exa[e], s)
         end
 
         push!(groups, Group(dict["examiner_ids"], s, dict["class_id"]))
@@ -292,6 +302,8 @@ function read_instance(path::String)
         κ,
         σ,
         δ,
+        S_exa,
+        S_stu,
         U,
         J,
         L,
