@@ -126,6 +126,9 @@ XLSX.openxlsx(room_file) do workbook
 
     for row in XLSX.eachtablerow(sheet)
         room_acronym = row[:Code]
+        if room_acronym[1] != '3'
+            continue
+        end
         room_data[room_acronym] = Dict{String,Any}()
     end
 end
