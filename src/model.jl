@@ -232,12 +232,12 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Exam grouped
-    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= I.L[d][1])
-    @variable(model, R[j = 1:I.n_j, d = 1:I.n_d] <= I.L[d][end])
+    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d] >= I.L[d][1])
+    @variable(model, R[e = 1:I.n_e, d = 1:I.n_d] <= I.L[d][end])
     @constraint(
         model,
-        exam_grouped_1_and_2[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
-        [r[j, d], -R[j, d]] .<=
+        exam_grouped_1_and_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        [r[e, d], -R[e, d]] .<=
         [l, -l] .+
         [I.L[d][end] - l, -I.L[d][1] + l] * (
             1 -
@@ -245,7 +245,7 @@ function declare_CM(I::Instance, model::Model)
             I.η[I.groups[j].s]
         )
     )
-    @constraint(model, exam_grouped_1[j = 1:I.n_j, d = 1:I.n_d], r[j, d] <= R[j, d])
+    @constraint(model, exam_grouped_1[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Room related constraints --- #
@@ -390,7 +390,7 @@ function declare_CM(I::Instance, model::Model)
     q_coef = 30 / (I.n_e * I.n_l)
     w_coef = 30 / I.n_j
     z_coef = 30 / (I.n_j * I.n_l * I.n_m)
-    Rr_coef = 30 / (I.n_j * I.n_d)
+    Rr_coef = 30 / (I.n_e * I.n_d)
 
     objective =
         y_coef * sum(y) +
@@ -542,19 +542,19 @@ function declare_RSD_jl(I::Instance, model::Model)
     @constraint(model, group_max_days_2_2[j = 1:I.n_j], 1 + w[j] <= I.κ[j])
 
     # Exam grouped
-    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= I.L[d][1])
-    @variable(model, R[j = 1:I.n_j, d = 1:I.n_d] <= I.L[d][end])
+    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d] >= I.L[d][1])
+    @variable(model, R[e = 1:I.n_e, d = 1:I.n_d] <= I.L[d][end])
     @constraint(
         model,
-        exam_grouped_1[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
-        r[j, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
+        exam_grouped_1[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
     )
     @constraint(
         model,
-        exam_grouped_2[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
-        R[j, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
+        exam_grouped_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
-    @constraint(model, exam_grouped_3[j = 1:I.n_j, d = 1:I.n_d], r[j, d] <= R[j, d])
+    @constraint(model, exam_grouped_3[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Exam related constraints --- #
@@ -768,7 +768,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     q_coef = 30 / (I.n_e * I.n_l)
     w_coef = 30 / I.n_j
     z_coef = 30 / (I.n_j * I.n_l)
-    Rr_coef = 30 / (I.n_j * I.n_d)
+    Rr_coef = 30 / (I.n_e * I.n_d)
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
