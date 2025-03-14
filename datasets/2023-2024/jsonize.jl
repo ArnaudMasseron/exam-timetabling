@@ -2,7 +2,7 @@ using XLSX
 using Dates
 
 # Read the files provided by the school and fetch the useful data
-data_dir = "/home/arnaud/Documents/UNIFR/travail/exam-timetabling/datasets/2023-2024/school_files/"
+data_dir = String(@__DIR__) * "/school_files/"
 exam_list_file = data_dir * "2324_CSUD_Liste_oraux.xlsx"
 teacher_schedule_file = data_dir * "2324_CSUD_Horaires_Juin.xlsx"
 room_file = data_dir * "2324_CSUD_Salles-liste.xlsx"
@@ -256,7 +256,7 @@ end
 
 # Save the dataset in a JSON file
 using JSON
-save_dir = "/home/arnaud/Documents/UNIFR/travail/exam-timetabling/datasets/2023-2024/"
+save_dir = String(@__DIR__) * "/"
 open(save_dir * "2023-2024_dataset.json", "w") do file
     JSON.print(file, dataset, 2)
 end
