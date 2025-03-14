@@ -832,11 +832,11 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
                 j = 1:I.n_j,
                 d = 1:I.n_d,
                 l in (l for l in I.L[d] if is_jl_valid[j, l]),
+                k in (k for k = 1:I.n_j if k != j && is_jl_valid[k, l]),
                 m = 1:I.n_m,
             ],
             sum(
-                b[k, l+t, m] for k = 1:I.n_j if k != j && is_jl_valid[k, l] for
-                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[j].u))
+                b[k, l+t, m] for t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[j].u))
             ) <= M(I.groups[j].s, I.groups[k].s) * (1 - b[j, l, m])
         )
     end
@@ -858,8 +858,8 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
                     0:min(
                         I.L[d][end] - l - I.ν[I.groups[j].s],
                         I.τ_room + I.μ[I.groups[j].s],
-                    )
-            ) <= M[s] * (1 - b[j, l, m])
+                    ) if is_jl_valid[j, l+I.ν[I.groups[j].s]+t]
+            ) <= M[I.groups[j].s] * (1 - b[j, l, m])
         )
     end
 end
@@ -873,11 +873,19 @@ function declare_RSD_ijlm(I::Instance, model_jlm::Model, model_ijlm::Model)
     @assert has_values(model_jlm) "The given RSD_jlm submodel must have values"
 
     # Valid indexes identification
-    is_jlm_valid = map(elt -> isapprox(elt, 1), value.(model_jlm[:b]))
+    dict_b = value.(model_jlm[:b]).data
+    is_jlm_valid = zeros(Bool, I.n_j, I.n_l, I.n_m)
+    for ((j, l, m), value) in value.(model_jlm[:b]).data
+        if isapprox(value, 1)
+            is_jlm_valid[j, l, m] = true
+        end
+    end
+
     is_ijlm_valid = zeros(Bool, I.n_i, I.n_j, I.n_l, I.n_m)
     for i = 1:I.n_i, j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m
         is_ijlm_valid[i, j, l, m] = I.γ[i, j] && is_jlm_valid[j, l, m]
     end
+
     valid_jlm = Set{Tuple{Int,Int,Int}}([
         (j, l, m) for j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m if is_jlm_valid[j, l, m]
     ])
