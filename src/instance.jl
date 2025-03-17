@@ -312,3 +312,120 @@ function read_instance(path::String)
         groups,
     )
 end
+
+
+Base.@kwdef struct SplitInstance
+    I::Instance
+
+    d_max::Int
+    scheduled_j::Set{Int}
+    new_j::Set{Int}
+end
+
+function split_instance(I::Instance, n_splits::Int)
+    # Order the examiner by the number of groups they belong too, and then by the number of exams they have to give.
+    examiner_nb_groups_exams = fill([0, 0], I.n_e)
+    examiner_group_ids = [Vector{Int}() for e = 1:I.n_e]
+    for e = 1:I.n_e, j = 1:I.n_j
+        if I.λ[e, j]
+            push!(examiner_group_ids[e], j)
+            examiner_nb_groups_exams[e][1] += 1
+            examiner_nb_groups_exams[e][2] += sum(I.γ[:, j])
+        end
+    end
+    ordered_examiners = sortperm(examiner_nb_groups_exams)
+
+    # Assign each group to one of the splits
+    group_splits = [Set{Int}() for split_id = 1:n_splits]
+    group_added = zeros(Bool, I.n_j)
+    nb_exams_student = zeros(Int, n_splits, I.n_i)
+    nb_exams_group = zeros(Int, n_splits, I.n_j)
+    nb_exams_examiner = zeros(Int, n_splits, I.n_e)
+
+    for e in ordered_examiners
+        for j in examiner_group_ids[e]
+            if !group_added[j]
+                explored_split = zeros(Bool, n_splits)
+                while !prod(explored_split)
+                    split_id = argmin([
+                        (!explored_split[split_id] ? length(group_splits[split_id]) : Inf) for split_id = 1:n_splits
+                    ])
+                    nb_days_split = (
+                        split_id != n_splits ? div(I.n_d, n_splits) :
+                        I.n_d - div(I.n_d, n_splits) * (n_splits - 1)
+                    )
+
+                    # See if j can be added to the selected split
+                    can_be_added = true
+                    nb_exams_j = Int(sum(I.γ[:, j]) / I.η[I.groups[j].s])
+
+                    # If too many exams for group j then can't be added
+                    if can_be_added &&
+                       nb_exams_group[split_id, j] + nb_exams_j > I.κ[j] * nb_days_split
+                        can_be_added = false
+                    end
+
+                    # If too many exams for a student then can't be added
+                    if can_be_added
+                        for i = 1:I.n_i
+                            if I.γ[i, j] &&
+                               nb_exams_student[split_id, i] + 1 > I.ξ * nb_days_split
+                                can_be_added = false
+                            end
+                        end
+                    end
+
+                    # If too many exams for examiner e then can't be added
+                    if can_be_added
+                        for e in I.groups[j].e
+                            if nb_exams_examiner[split_id, e] + nb_exams_j >
+                               I.ζ[e] * nb_days_split
+                                can_be_added = false
+                                break
+                            end
+                        end
+                    end
+
+                    if !can_be_added
+                        explored_split[split_id] = true
+                        continue
+                    end
+
+                    push!(group_splits[split_id], j)
+
+                    nb_exams_group[split_id, j] += nb_exams_j
+                    for i = 1:I.n_i
+                        if I.γ[i, j]
+                            nb_exams_student[split_id, i] += 1
+                        end
+                    end
+                    for e in I.groups[j].e
+                        nb_exams_examiner[split_id, e] += nb_exams_j
+                    end
+
+                    group_added[j] = true
+                    break
+                end
+
+                if prod(explored_split)
+                    error(
+                        "Heuristic algorithm wasn't able to find a possibly feasible split",
+                    )
+                end
+            end
+        end
+    end
+
+    # Create the instances
+    day_step = div(I.n_d, n_splits)
+    split_instances = [
+        SplitInstance(
+            I = I,
+            d_max = (split_id != n_splits ? split_id * day_step : I.n_d),
+            scheduled_j = (split_id != 1 ? union(group_splits[1:split_id-1]...) : Set()),
+            new_j = group_splits[split_id],
+        ) for split_id = 1:n_splits
+    ]
+
+    return split_instances
+end

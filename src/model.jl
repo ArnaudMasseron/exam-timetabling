@@ -774,6 +774,421 @@ function declare_RSD_jl(I::Instance, model::Model)
     @objective(model, Min, objective)
 end
 
+function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = nothing)
+    I = SplitI.I
+    d_max = SplitI.d_max
+    l_max = I.L[d_max][end]
+
+    valid_j = union(SplitI.scheduled_j, SplitI.new_j)
+    is_j_valid = zeros(Bool, I.n_j)
+    for j in valid_j
+        is_j_valid[j] = true
+    end
+    valid_e = Set{Int}(vcat([I.groups[j].e for j in valid_j]...))
+
+    # --- Main decision variables --- #
+    @variable(model, f[j in valid_j, l = 1:l_max], binary = true)
+
+
+    # --- General constraints --- #
+    # Declare the exams that were already scheduled
+    if !isnothing(prev_model)
+        prev_f_values = value.(prev_model[:f])
+        exam_ids = [
+            (j, l) for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2] if
+            isapprox(prev_f_values[j, l], 1)
+        ]
+        fix.([f[j, l] for (j, l) in exam_ids], 1; force = true)
+
+        rem_ids = [
+            (j, l) for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2] if
+            isapprox(prev_f_values[j, l], 0)
+        ]
+        fix.([f[j, l] for (j, l) in rem_ids], 0; force = true)
+    end
+
+
+    # --- Group related constraints --- #
+    # Group availability
+    @variable(model, 0 <= q[e in valid_e, l = 1:l_max] <= 1)
+    let
+        M(j) = length(I.groups[j].e)
+
+        sum_ids = Set{Tuple{Int,Int}}()
+        for s = 1:I.n_s,
+            j in (j for j in I.J[s] if is_j_valid[j]),
+            e in I.groups[j].e,
+            d = 1:d_max,
+            l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+
+            one_alpha_null = !prod(I.α[e, l-I.μ[s]:l+I.ν[s]-1])
+            if one_alpha_null
+                fix(f[j, l], 0; force = true)
+            else
+                push!(sum_ids, (j, l))
+            end
+        end
+
+        @constraint(
+            model,
+            group_availability[(j, l) in sum_ids],
+            M(j) * f[j, l] <= sum(I.β[e, l] ? 1 : q[e, l] for e in I.groups[j].e)
+        )
+    end
+
+    # Remove useless q
+    let
+        fix_ids = [(e, l) for e in valid_e, l = 1:l_max if !I.α[e, l] || I.β[e, l]]
+        fix.([q[e, l] for (e, l) in fix_ids], 0; force = true)
+    end
+
+    # Group one block cancelation
+    @constraint(
+        model,
+        group_one_block_cancelation[
+            e in valid_e,
+            P in I.U[e],
+            a in (a for a = 1:lastindex(P)-1 if P[a+1] <= l_max),
+        ],
+        q[e, P[a]] == q[e, P[a+1]],
+    )
+
+    # Group one exam
+    let
+        M = 1
+        @constraint(
+            model,
+            group_one_exam[
+                s in (s for s = 1:I.n_s if I.ν[s] > 1),
+                j in (j for j in I.J[s] if is_j_valid[j]),
+                d = 1:d_max,
+                l in I.L[d][1:end-(I.ν[s]-1)],
+            ],
+            sum(f[j, l+t] for t = 1:I.ν[s]-1) <= M * (1 - f[j, l])
+        )
+    end
+
+    # Examiner lunch break 1
+    @variable(model, b[e in valid_e, l in vcat(I.V[1:d_max]...)], binary = true)
+    let
+        M = [ceil((I.μ[s] + I.τ_lun - 1 - (-I.ν[s] + 1) + 1) / I.ν[s]) for s = 1:I.n_s]
+
+        @constraint(
+            model,
+            examiner_lunch_break_1[j in valid_j, d = 1:d_max, l in I.V[d]],
+            sum(
+                f[j, l+t] for t =
+                    max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
+                        I.L[d][end] - l,
+                        I.μ[I.groups[j].s] + I.τ_lun - 1,
+                    )
+            ) <= M[I.groups[j].s] * sum(1 .- b[e, l] for e in I.groups[j].e)
+        )
+    end
+
+    # Examiner lunch break 2
+    @constraint(
+        model,
+        examiner_lunch_break_2[e in valid_e, d = 1:d_max],
+        sum(b[e, l] for l in I.V[d]) >= 1
+    )
+
+    # Group switch break
+    let
+        M = [
+            maximum(
+                vcat(
+                    [
+                        ceil(
+                            (I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s] + 1) / I.ν[I.groups[k].s],
+                        ) for k in valid_j if k != j && I.σ[j, k]
+                    ],
+                    [0],
+                ),
+            ) for j = 1:I.n_j
+        ]
+
+        @constraint(
+            model,
+            group_switch_break[j in valid_j, d = 1:d_max, l in I.L[d]],
+            sum(
+                f[k, l+t] for k in valid_j if k != j && I.σ[j, k] for t =
+                    0:min(
+                        I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
+                        I.L[d][end] - l,
+                    )
+            ) <= M[j] * (1 - f[j, l])
+        )
+    end
+
+    # Examiner max exams
+    @constraint(
+        model,
+        examiner_max_exams[e in valid_e, d = 1:d_max],
+        sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]) <= I.ζ[e]
+    )
+
+    # Group max days 1
+    @variable(model, v[j in valid_j, d = 1:d_max], binary = true)
+    let
+        M(d) = length(I.L[d])
+        @constraint(
+            model,
+            group_max_days_1[d = 1:d_max, j in valid_j],
+            sum(f[j, l] for l in I.L[d]) <= M(d) * v[j, d]
+        )
+    end
+
+    # Group max days 2 and 3
+    @variable(model, w[j in valid_j] >= 0)
+    @constraint(
+        model,
+        group_max_days_2_1[j in valid_j],
+        sum(v[j, d] for d = 1:d_max) <= 1 + w[j]
+    )
+    @constraint(model, group_max_days_2_2[j in valid_j], 1 + w[j] <= I.κ[j])
+
+    # Exam grouped
+    @variable(model, r[e in valid_e, d = 1:d_max] >= I.L[d][1])
+    @variable(model, R[e in valid_e, d = 1:d_max] <= I.L[d][end])
+    @constraint(
+        model,
+        exam_grouped_1[j in valid_j, e in I.groups[j].e, d = 1:d_max, l in I.L[d]],
+        r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
+    )
+    @constraint(
+        model,
+        exam_grouped_2[j in valid_j, e in I.groups[j].e, d = 1:d_max, l in I.L[d]],
+        R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
+    )
+    @constraint(model, exam_grouped_3[e in valid_e, d = 1:d_max], r[e, d] <= R[e, d])
+
+
+    # --- Exam related constraints --- #
+    # Exam start and end
+    fix.(
+        [
+            f[j, l] for j in valid_j, d = 1:d_max for
+            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][end-I.ν[I.groups[j].s]-1:end])
+        ],
+        0;
+        force = true,
+    )
+
+    # Exam continuity 3
+    @variable(model, z[j in valid_j, l = 1:l_max] >= 0)
+
+    # Exam continuity 1
+    @variable(model, z_tilde[j in valid_j, l = 1:l_max], binary = true)
+    @constraint(
+        model,
+        exam_continuity_1_1[
+            j in valid_j,
+            d = 1:d_max,
+            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+        ],
+        z_tilde[j, l] <=
+        sum(1 - f[j, l-t] for t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s]))
+    )
+    @constraint(
+        model,
+        exam_continuity_1_2[
+            j in valid_j,
+            d = 1:d_max,
+            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+        ],
+        sum(1 - f[j, l-t] for t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s])) <=
+        I.ρ[I.groups[j].s] * z_tilde[j, l]
+    )
+    @constraint(
+        model,
+        exam_continuity_1_3[
+            j in valid_j,
+            d = 1:d_max,
+            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+        ],
+        f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l] + z_tilde[j, l]
+    )
+
+    # Exam continuity 2
+    @constraint(
+        model,
+        exam_continuity_2[
+            j in valid_j,
+            d = 1:d_max,
+            l in I.L[d][1+I.ν[I.groups[j].s]:I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]],
+        ],
+        f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l]
+    )
+
+    # Exam break
+    let
+        M = [ceil((I.τ_seq + I.μ[s] + 1) / I.ν[s]) for s = 1:I.n_s]
+
+        @constraint(
+            model,
+            exam_break[
+                j in valid_j,
+                d = 1:d_max,
+                l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            ],
+            sum(f[j, l+t] for t = 0:min(I.L[d][end] - l, I.τ_seq + I.μ[I.groups[j].s])) <=
+            M[I.groups[j].s] * (
+                I.ρ[I.groups[j].s] -
+                sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s])
+            )
+        )
+    end
+
+
+    # --- Room related constraints --- #
+    # Room occupation 1
+    @variable(model, h[j in valid_j, l = 1:l_max], binary = true)
+    let
+        M = [I.ν[s] + max(I.τ_seq, I.τ_room) - 1 + I.μ[s] + 1 for s = 1:I.n_s]
+
+        @constraint(
+            model,
+            room_occupation_1[
+                j in valid_j,
+                d = 1:d_max,
+                l in I.L[d][I.μ[I.groups[j].s]+1:end-I.ν[I.groups[j].s]],
+            ],
+            sum(
+                1 - h[j, l+t] for t =
+                    -I.μ[I.groups[j].s]:min(
+                        I.L[d][end] - l,
+                        I.ν[I.groups[j].s] + max(I.τ_seq, I.τ_room) - 1,
+                    )
+            ) <= M[I.groups[j].s] * (1 - f[j, l])
+        )
+    end
+
+    # Room occupation 2
+    @constraint(
+        model,
+        room_occupation_2[s = 1:I.n_s, l = 1:l_max],
+        sum(h[j, l] for j in (j for j in I.J[s] if is_j_valid[j])) <= sum(I.δ[:, l, s])
+    )
+
+
+    # --- Student related constraints --- #
+    @variable(model, g[i = 1:I.n_i, j in valid_j, l = 1:l_max; I.γ[i, j]], binary = true)
+
+    # Subjects that student i has to take, classified by preparation and presentation time
+    S_stu_ord = [Dict{Tuple{Int,Int},Vector{Int}}() for i = 1:I.n_i]
+    for i = 1:I.n_i, j in valid_j
+        if I.γ[i, j]
+            s = I.groups[j].s
+            if !haskey(S_stu_ord[i], (I.μ[s], I.ν[s]))
+                S_stu_ord[i][(I.μ[s], I.ν[s])] = []
+            end
+            push!(S_stu_ord[i][(I.μ[s], I.ν[s])], s)
+        end
+    end
+
+    # Student availability
+    let
+        sum_ids = Set{Tuple{Int,Int,Tuple{Int,Int}}}()
+        for i = 1:I.n_i,
+            ((mu, nu), value) in S_stu_ord[i],
+            s in value,
+            d = 1:d_max,
+            l in I.L[d][1+mu:end-(nu-1)]
+
+            RHS = prod(I.θ[i, l-mu:l+nu-1])
+            if !RHS
+                valid_j = (j for j in I.J[s] if is_j_valid[j] && I.γ[i, j])
+                fix.(g[i, valid_j, l], 0; force = true)
+            else
+                push!(sum_ids, (i, l, (mu, nu)))
+            end
+        end
+
+        @constraint(
+            model,
+            student_availability[(i, l, key) in sum_ids],
+            sum(
+                g[i, j, l] for s in S_stu_ord[i][key] for
+                j in I.J[s] if is_j_valid[j] && I.γ[i, j]
+            ) <= 1
+        )
+    end
+
+    # Student one exam 1
+    @constraint(
+        model,
+        student_one_exam_1[i = 1:I.n_i, l = 1:l_max],
+        sum(g[i, j, l] for j in valid_j if I.γ[i, j]) <= 1
+    )
+
+
+    # Student one exam 2
+    let
+        μ_max_stu =
+            [maximum(I.μ[I.groups[j].s] for j in valid_j if I.γ[i, j]) for i = 1:I.n_i]
+        ν_min_stu =
+            [minimum(I.ν[I.groups[j].s] for j in valid_j if I.γ[i, j]) for i = 1:I.n_i]
+
+        M(i, nu, d, l) =
+            sum(I.γ[i, :]) *
+            ceil((min(nu - 1 + I.τ_stu + μ_max_stu[i], I.L[d][end] - l)) / ν_min_stu[i])
+
+        @constraint(
+            model,
+            student_one_exam_2[
+                i = 1:I.n_i,
+                ((mu, nu), valid_s) in S_stu_ord[i],
+                d = 1:d_max,
+                l in I.L[d],
+            ],
+            sum(
+                g[i, k, l+t] for k in valid_j if I.γ[i, k] for
+                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l)
+            ) <=
+            M(i, nu, d, l) * (
+                1 - sum(
+                    g[i, j, l] for s in valid_s for
+                    j in I.J[s] if is_j_valid[j] && I.γ[i, j]
+                )
+            )
+        )
+    end
+
+    # Student max exams
+    @constraint(
+        model,
+        student_max_exams[i = 1:I.n_i, d = 1:d_max],
+        sum(g[i, j, l] for j = 1:I.n_j if is_j_valid[j] && I.γ[i, j] for l in I.L[d]) <=
+        I.ξ
+    )
+
+    # Exam needed
+    @constraint(
+        model,
+        exam_needed[j in SplitI.new_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
+        sum(g[i, j, l] for l = 1:l_max) == 1
+    )
+
+    # Student hard constraints link
+    @constraint(
+        model,
+        student_hard_constraints_link[j in valid_j, l = 1:l_max],
+        sum(g[i, j, l] for i in (i for i = 1:I.n_i if I.γ[i, j])) / I.η[I.groups[j].s] ==
+        f[j, l]
+    )
+
+
+    # --- Objective function --- #
+    q_coef = 30 / (I.n_e * l_max)
+    w_coef = 30 / I.n_j
+    z_coef = 30 / (I.n_j * l_max)
+    Rr_coef = 30 / (I.n_e * d_max)
+
+    objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
+    @objective(model, Min, objective)
+end
+
 function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
     #=
     [input] I: instance
@@ -782,9 +1197,16 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
     =#
     @assert has_values(model_jl) "The given RSD_jl submodel must have values"
 
+    is_jl_valid = zeros(Bool, I.n_j, I.n_l)
+    prev_f_values = value.(model_jl[:f])
+    for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
+        if isapprox(prev_f_values[j, l], 1)
+            is_jl_valid[j, l] = true
+        end
+    end
+
 
     # --- Main decision variables --- #
-    is_jl_valid = map(elt -> isapprox(elt, 1), value.(model_jl[:f]))
     @variable(
         model_jlm,
         b[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; is_jl_valid[j, l]],
@@ -836,7 +1258,9 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
                 m = 1:I.n_m,
             ],
             sum(
-                b[k, l+t, m] for t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[j].u))
+                b[k, l+t, m] for
+                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[j].s)) if
+                is_jl_valid[k, l+t]
             ) <= M(I.groups[j].s, I.groups[k].s) * (1 - b[j, l, m])
         )
     end
