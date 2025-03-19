@@ -30,6 +30,7 @@ Base.@kwdef struct Instance
     γ::Matrix{Bool}
     θ::Matrix{Bool}
 
+    κ::Vector{Int}
     ζ::Vector{Int}
     α::Matrix{Bool}
     β::Matrix{Bool}
@@ -40,7 +41,6 @@ Base.@kwdef struct Instance
     μ::Vector{Int}
     ν::Vector{Int}
 
-    κ::Vector{Int}
     σ::Matrix{Bool}
 
     δ::Array{Bool,3}
@@ -167,12 +167,14 @@ function read_instance(path::String)
         end
     end
 
+    κ = -ones(Int, n_e)
     ζ = zeros(Int, n_e)
     α = ones(Bool, n_e, n_l)
     β = ones(Bool, n_e, n_l)
     U = Vector{Vector{Vector{Int}}}([Vector{Vector{Int}}() for e = 1:n_e])
     for (e, dict) in enumerate(dataset["examiners"])
         ζ[e] = dict["max_number_exams_per_day"]
+        κ[e] = dict["max_number_days"]
 
         for (start_datetime_str, end_datetime_str) in dict["hard_unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
@@ -221,15 +223,12 @@ function read_instance(path::String)
         ν[s] = dict["duration_time"]
     end
 
-    κ = -ones(Int, n_j)
     λ = zeros(Bool, n_e, n_j)
     J = Vector{Set{Int}}([Set{Int}() for s = 1:n_s])
     groups = Vector{Group}()
     S_exa = [Set{Int}() for e = 1:n_e]
     for (j, dict) in enumerate(dataset["groups"])
         s = dict["subject_id"]
-
-        κ[j] = dict["max_number_days"]
         push!(J[s], j)
 
         for e in dict["examiner_ids"]
@@ -291,6 +290,7 @@ function read_instance(path::String)
         ε,
         γ,
         θ,
+        κ,
         ζ,
         α,
         β,
@@ -299,7 +299,6 @@ function read_instance(path::String)
         ρ,
         μ,
         ν,
-        κ,
         σ,
         δ,
         S_exa,
@@ -359,12 +358,6 @@ function split_instance(I::Instance, n_splits::Int)
                     can_be_added = true
                     nb_exams_j = Int(sum(I.γ[:, j]) / I.η[I.groups[j].s])
 
-                    # If too many exams for group j then can't be added
-                    if can_be_added &&
-                       nb_exams_group[split_id, j] + nb_exams_j > I.κ[j] * nb_days_split
-                        can_be_added = false
-                    end
-
                     # If too many exams for a student then can't be added
                     if can_be_added
                         for i = 1:I.n_i
@@ -378,9 +371,20 @@ function split_instance(I::Instance, n_splits::Int)
                     # If too many exams for examiner e then can't be added
                     if can_be_added
                         for e in I.groups[j].e
-                            if nb_exams_examiner[split_id, e] + nb_exams_j >
-                               I.ζ[e] * nb_days_split
-                                can_be_added = false
+                            n_min_days_e = sum(
+                                ceil(
+                                    (
+                                        nb_exams_examiner[s_id, e] +
+                                        (s_id == split_id) * nb_exams_j
+                                    ) / I.ζ[e],
+                                ) for s_id = 1:n_splits
+                            )
+
+                            can_be_added =
+                                nb_exams_examiner[split_id, e] + nb_exams_j <=
+                                I.ζ[e] * nb_days_split && n_min_days_e <= I.κ[e]
+
+                            if !can_be_added
                                 break
                             end
                         end

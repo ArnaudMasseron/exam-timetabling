@@ -189,23 +189,27 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Group max days 1
-    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true)
+    @variable(model, v[e = 1:I.n_e, d = 1:I.n_d], binary = true)
     let
-        M(s, d) = ceil(length(I.L[d]) / I.ν[s])
+        ν_min_exa = [minimum([I.ν[s] for s in I.S_exa[e]]) for e = 1:I.n_e]
+        M(e, d) = ceil(length(I.L[d]) / ν_min_exa[e])
+
         @constraint(
             model,
-            group_max_days_1[j = 1:I.n_j, d = 1:I.n_d],
-            sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for l in I.L[d], m = 1:I.n_m) <=
-            M(I.groups[j].s, d) * v[j, d]
+            group_max_days_1[e = 1:I.n_e, d = 1:I.n_d],
+            sum(
+                x[i, j, l, m] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i if I.γ[i, j] for
+                l in I.L[d], m = 1:I.n_m
+            ) <= M(I.groups[j].s, d) * v[e, d]
         )
     end
 
     # Group max days 2 and 3
-    @variable(model, w[j = 1:I.n_j] >= 0)
+    @variable(model, w[e = 1:I.n_e] >= 0)
     @constraint(
         model,
-        group_max_days_2[j = 1:I.n_j],
-        (1 + w[j]) .* [-1, 1] .<= [-sum(v[j, d] for d = 1:I.n_d), I.κ[j]]
+        group_max_days_2[e = 1:I.n_e],
+        (1 + w[e]) .* [-1, 1] .<= [-sum(v[e, d] for d = 1:I.n_d), I.κ[e]]
     )
 
     # Room switch break
@@ -388,7 +392,7 @@ function declare_CM(I::Instance, model::Model)
     # --- Objective function --- #
     y_coef = 30 / I.n_i
     q_coef = 30 / (I.n_e * I.n_l)
-    w_coef = 30 / I.n_j
+    w_coef = 30 / I.n_e
     z_coef = 30 / (I.n_j * I.n_l * I.n_m)
     Rr_coef = 30 / (I.n_e * I.n_d)
 
@@ -522,24 +526,24 @@ function declare_RSD_jl(I::Instance, model::Model)
     )
 
     # Group max days 1
-    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true)
+    @variable(model, v[e = 1:I.n_e, d = 1:I.n_d], binary = true)
     let
         M(d) = length(I.L[d])
         @constraint(
             model,
-            group_max_days_1[d = 1:I.n_d, j = 1:I.n_j],
-            sum(f[j, l] for l in I.L[d]) <= M(d) * v[j, d]
+            group_max_days_1[d = 1:I.n_d, e = 1:I.n_e],
+            sum(f[j, l] for j = 1:I.n_j if I.λ[e, j] for l in I.L[d]) <= M(d) * v[e, d]
         )
     end
 
     # Group max days 2 and 3
-    @variable(model, w[j = 1:I.n_j] >= 0)
+    @variable(model, w[e = 1:I.n_e] >= 0)
     @constraint(
         model,
-        group_max_days_2_1[j = 1:I.n_j],
-        sum(v[j, d] for d = 1:I.n_d) <= 1 + w[j]
+        group_max_days_2_1[e = 1:I.n_e],
+        sum(v[e, d] for d = 1:I.n_d) <= 1 + w[e]
     )
-    @constraint(model, group_max_days_2_2[j = 1:I.n_j], 1 + w[j] <= I.κ[j])
+    @constraint(model, group_max_days_2_2[e = 1:I.n_e], 1 + w[e] <= I.κ[e])
 
     # Exam grouped
     @variable(model, r[e = 1:I.n_e, d = 1:I.n_d] >= I.L[d][1])
@@ -766,7 +770,7 @@ function declare_RSD_jl(I::Instance, model::Model)
 
     # --- Objective function --- #
     q_coef = 30 / (I.n_e * I.n_l)
-    w_coef = 30 / I.n_j
+    w_coef = 30 / I.n_e
     z_coef = 30 / (I.n_j * I.n_l)
     Rr_coef = 30 / (I.n_e * I.n_d)
 
@@ -929,24 +933,24 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     )
 
     # Group max days 1
-    @variable(model, v[j in valid_j, d = 1:d_max], binary = true)
+    @variable(model, v[e in valid_e, d = 1:d_max], binary = true)
     let
         M(d) = length(I.L[d])
         @constraint(
             model,
-            group_max_days_1[d = 1:d_max, j in valid_j],
-            sum(f[j, l] for l in I.L[d]) <= M(d) * v[j, d]
+            group_max_days_1[d = 1:d_max, e in valid_e],
+            sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]) <= M(d) * v[e, d]
         )
     end
 
     # Group max days 2 and 3
-    @variable(model, w[j in valid_j] >= 0)
+    @variable(model, w[e in valid_e] >= 0)
     @constraint(
         model,
-        group_max_days_2_1[j in valid_j],
-        sum(v[j, d] for d = 1:d_max) <= 1 + w[j]
+        group_max_days_2_1[e in valid_e],
+        sum(v[e, d] for d = 1:d_max) <= 1 + w[e]
     )
-    @constraint(model, group_max_days_2_2[j in valid_j], 1 + w[j] <= I.κ[j])
+    @constraint(model, group_max_days_2_2[e in valid_e], 1 + w[e] <= I.κ[e])
 
     # Exam grouped
     @variable(model, r[e in valid_e, d = 1:d_max] >= I.L[d][1])
@@ -1181,7 +1185,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
     # --- Objective function --- #
     q_coef = 30 / (I.n_e * l_max)
-    w_coef = 30 / I.n_j
+    w_coef = 30 / I.n_e
     z_coef = 30 / (I.n_j * l_max)
     Rr_coef = 30 / (I.n_e * d_max)
 
