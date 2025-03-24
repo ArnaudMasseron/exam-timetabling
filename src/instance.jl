@@ -317,106 +317,150 @@ Base.@kwdef struct SplitInstance
     I::Instance
 
     d_max::Int
-    scheduled_j::Set{Int}
-    new_j::Set{Int}
+    scheduled_exams::Set{Tuple{Int,Int}}
+    new_exams::Set{Tuple{Int,Int}}
 end
 
-function split_instance(I::Instance, n_splits::Int)
-    # Order the examiner by the number of groups they belong too, and then by the number of exams they have to give.
-    examiner_nb_groups_exams = fill([0, 0], I.n_e)
-    examiner_group_ids = [Vector{Int}() for e = 1:I.n_e]
-    for e = 1:I.n_e, j = 1:I.n_j
-        if I.λ[e, j]
-            push!(examiner_group_ids[e], j)
-            examiner_nb_groups_exams[e][1] += 1
-            examiner_nb_groups_exams[e][2] += sum(I.γ[:, j])
-        end
-    end
-    ordered_examiners = sortperm(examiner_nb_groups_exams)
+function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
+    #= Solve the splitting MILP problem =#
+    @assert n_splits <= I.n_d "Can't have more splits than the number of days"
 
-    # Assign each group to one of the splits
-    group_splits = [Set{Int}() for split_id = 1:n_splits]
-    group_added = zeros(Bool, I.n_j)
-    nb_exams_student = zeros(Int, n_splits, I.n_i)
-    nb_exams_group = zeros(Int, n_splits, I.n_j)
-    nb_exams_examiner = zeros(Int, n_splits, I.n_e)
+    # Initialize some data
+    day_step = div(I.n_d, n_splits)
+    days_split = vcat(
+        [Vector((split-1)*day_step+1:split*day_step) for split = 1:n_splits-1],
+        [Vector(day_step*(n_splits-1)+1:I.n_d)],
+    )
 
-    for e in ordered_examiners
-        for j in examiner_group_ids[e]
-            if !group_added[j]
-                explored_split = zeros(Bool, n_splits)
-                while !prod(explored_split)
-                    split_id = argmin([
-                        (!explored_split[split_id] ? length(group_splits[split_id]) : Inf) for split_id = 1:n_splits
-                    ])
-                    nb_days_split = (
-                        split_id != n_splits ? div(I.n_d, n_splits) :
-                        I.n_d - div(I.n_d, n_splits) * (n_splits - 1)
-                    )
+    exams = [(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]]
+    n_exams = length(exams)
 
-                    # See if j can be added to the selected split
-                    can_be_added = true
-                    nb_exams_j = Int(sum(I.γ[:, j]) / I.η[I.groups[j].s])
+    model = Model(Gurobi.Optimizer)
 
-                    # If too many exams for a student then can't be added
-                    if can_be_added
-                        for i = 1:I.n_i
-                            if I.γ[i, j] &&
-                               nb_exams_student[split_id, i] + 1 > I.ξ * nb_days_split
-                                can_be_added = false
-                            end
-                        end
-                    end
+    # --- Main decision variables --- #
+    @variable(model, x[exam = 1:n_exams, split = 1:n_splits], binary = true)
 
-                    # If too many exams for examiner e then can't be added
-                    if can_be_added
-                        for e in I.groups[j].e
-                            n_min_days_e = sum(
-                                ceil(
-                                    (
-                                        nb_exams_examiner[s_id, e] +
-                                        (s_id == split_id) * nb_exams_j
-                                    ) / I.ζ[e],
-                                ) for s_id = 1:n_splits
-                            )
 
-                            can_be_added =
-                                nb_exams_examiner[split_id, e] + nb_exams_j <=
-                                I.ζ[e] * nb_days_split && n_min_days_e <= I.κ[e]
+    # --- Constraints --- #
+    # Exam one split
+    @constraint(
+        model,
+        exam_one_split[exam in 1:n_exams],
+        sum(x[exam, split] for split = 1:n_splits) == 1
+    )
 
-                            if !can_be_added
-                                break
-                            end
-                        end
-                    end
+    # Feasible amount of students in each split for exams with multiple simultaneous students
+    @variable(model, r[j = 1:I.n_j, split = 1:n_splits] >= 0, integer = true)
+    @constraint(
+        model,
+        group_feasible_amount_students[j = 1:I.n_j, split = 1:n_splits],
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][2] == j) ==
+        r[j, split] * I.η[I.groups[j].s]
+    )
 
-                    if !can_be_added
-                        explored_split[split_id] = true
-                        continue
-                    end
+    # Student max exams
+    @constraint(
+        model,
+        student_max_exams[i = 1:I.n_i, split = 1:n_splits],
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) <=
+        length(days_split[split]) * I.ξ
+    )
 
-                    push!(group_splits[split_id], j)
+    # Examiner enough time
+    @constraint(
+        model,
+        examiner_enough_time[e = 1:I.n_e, split = 1:n_splits],
+        sum(
+            let s = I.groups[exams[exam][2]].s
+                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+        ) <= fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split])
+    )
 
-                    nb_exams_group[split_id, j] += nb_exams_j
-                    for i = 1:I.n_i
-                        if I.γ[i, j]
-                            nb_exams_student[split_id, i] += 1
-                        end
-                    end
-                    for e in I.groups[j].e
-                        nb_exams_examiner[split_id, e] += nb_exams_j
-                    end
+    # Examiner max exams
+    @constraint(
+        model,
+        examiner_max_exams[e = 1:I.n_e, split = 1:n_splits],
+        sum(
+            x[exam, split] / I.η[I.groups[exams[exam][2]].s] for
+            exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+        ) <= length(days_split[split]) * I.ζ[e]
+    )
 
-                    group_added[j] = true
-                    break
-                end
+    # Examiner max days
+    @variable(
+        model,
+        0 <= z[e = 1:I.n_e, split = 1:n_splits] <= length(days_split[split]),
+        integer = true
+    )
+    @constraint(
+        model,
+        examiner_max_days_1[e = 1:I.n_e, split = 1:n_splits],
+        sum(
+            x[exam, split] / I.η[I.groups[exams[exam][2]].s] for
+            exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+        ) <= z[e, split] * I.ζ[e]
+    )
+    @constraint(
+        model,
+        examiner_max_days_2[e = 1:I.n_e, split = 1:n_splits],
+        sum(
+            let s = I.groups[exams[exam][2]].s
+                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+        ) <=
+        z[e, split] * fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split]) /
+        length(days_split[split])
+    )
+    @constraint(
+        model,
+        examiner_max_days_3[e = 1:I.n_e],
+        sum(z[e, split] for split = 1:n_splits) <= I.κ[e]
+    )
 
-                if prod(explored_split)
-                    error(
-                        "Heuristic algorithm wasn't able to find a possibly feasible split",
-                    )
-                end
-            end
+    # Harmonious exam distribution between splits
+    @variable(model, p[split in 1:n_splits] >= 0)
+    @constraint(
+        model,
+        split_harmonious_exams_1[split = 1:n_splits],
+        p[split] >= sum(x[exam, split] for exam = 1:n_exams) - n_exams / n_splits
+    )
+    @constraint(
+        model,
+        split_harmonious_exams_2[split = 1:n_splits],
+        p[split] >= n_exams / n_splits - sum(x[exam, split] for exam = 1:n_exams)
+    )
+
+    # Student harmonious exams
+    @variable(model, q[i = 1:I.n_i, split = 1:n_splits])
+    @constraint(
+        model,
+        student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
+        q[i, split] >=
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) - I.ε[i] / n_splits
+    )
+    @constraint(
+        model,
+        student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
+        q[i, split] >=
+        I.ε[i] / n_splits - sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i)
+    )
+
+
+    # --- Objective --- #
+    p_coef = 70 / n_exams
+    q_coef = 30 / n_exams
+    objective = p_coef * sum(p) + q_coef * sum(q)
+    @objective(model, Min, objective)
+
+
+    # Solve MILP and retrieve results
+    optimize!(model)
+
+    exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
+    for exam = 1:n_exams, split = 1:n_splits
+        if isapprox(value(x[exam, split]), 1)
+            push!(exam_splits[split], exams[exam])
         end
     end
 
@@ -426,8 +470,8 @@ function split_instance(I::Instance, n_splits::Int)
         SplitInstance(
             I = I,
             d_max = (split_id != n_splits ? split_id * day_step : I.n_d),
-            scheduled_j = (split_id != 1 ? union(group_splits[1:split_id-1]...) : Set()),
-            new_j = group_splits[split_id],
+            scheduled_exams = (split_id != 1 ? union(exam_splits[1:split_id-1]...) : Set()),
+            new_exams = exam_splits[split_id],
         ) for split_id = 1:n_splits
     ]
 

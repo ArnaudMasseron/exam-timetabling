@@ -782,13 +782,25 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     I = SplitI.I
     d_max = SplitI.d_max
     l_max = I.L[d_max][end]
+    valid_ij = union(SplitI.scheduled_exams, SplitI.new_exams)
 
-    valid_j = union(SplitI.scheduled_j, SplitI.new_j)
+    valid_i = Set{Int}()
+    valid_j = Set{Int}()
     is_j_valid = zeros(Bool, I.n_j)
-    for j in valid_j
+    is_ij_valid = zeros(Bool, I.n_i, I.n_j)
+    valid_e = Set{Int}()
+    for (i, j) in valid_ij
+        push!(valid_i, i)
+
+        push!(valid_j, j)
         is_j_valid[j] = true
+
+        is_ij_valid[i, j] = true
+
+        for e in I.groups[j].e
+            push!(valid_e, e)
+        end
     end
-    valid_e = Set{Int}(vcat([I.groups[j].e for j in valid_j]...))
 
     # --- Main decision variables --- #
     @variable(model, f[j in valid_j, l = 1:l_max], binary = true)
@@ -798,16 +810,18 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Declare the exams that were already scheduled
     if !isnothing(prev_model)
         prev_f_values = value.(prev_model[:f])
-        exam_ids = [
-            (j, l) for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2] if
-            isapprox(prev_f_values[j, l], 1)
-        ]
-        fix.([f[j, l] for (j, l) in exam_ids], 1; force = true)
 
-        rem_ids = [
-            (j, l) for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2] if
-            isapprox(prev_f_values[j, l], 0)
-        ]
+        exam_ids = []
+        rem_ids = []
+        for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
+            if isapprox(prev_f_values[j, l], 1)
+                push!(exam_ids, (j, l))
+            else
+                push!(rem_ids, (j, l))
+            end
+        end
+
+        fix.([f[j, l] for (j, l) in exam_ids], 1; force = true)
         fix.([f[j, l] for (j, l) in rem_ids], 0; force = true)
     end
 
@@ -1077,24 +1091,26 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
 
     # --- Student related constraints --- #
-    @variable(model, g[i = 1:I.n_i, j in valid_j, l = 1:l_max; I.γ[i, j]], binary = true)
+    @variable(
+        model,
+        g[i = 1:I.n_i, j = 1:I.n_j, l = 1:l_max; is_ij_valid[i, j]],
+        binary = true
+    )
 
     # Subjects that student i has to take, classified by preparation and presentation time
     S_stu_ord = [Dict{Tuple{Int,Int},Vector{Int}}() for i = 1:I.n_i]
-    for i = 1:I.n_i, j in valid_j
-        if I.γ[i, j]
-            s = I.groups[j].s
-            if !haskey(S_stu_ord[i], (I.μ[s], I.ν[s]))
-                S_stu_ord[i][(I.μ[s], I.ν[s])] = []
-            end
-            push!(S_stu_ord[i][(I.μ[s], I.ν[s])], s)
+    for (i, j) in valid_ij
+        s = I.groups[j].s
+        if !haskey(S_stu_ord[i], (I.μ[s], I.ν[s]))
+            S_stu_ord[i][(I.μ[s], I.ν[s])] = []
         end
+        push!(S_stu_ord[i][(I.μ[s], I.ν[s])], s)
     end
 
     # Student availability
     let
         sum_ids = Set{Tuple{Int,Int,Tuple{Int,Int}}}()
-        for i = 1:I.n_i,
+        for i in valid_i,
             ((mu, nu), value) in S_stu_ord[i],
             s in value,
             d = 1:d_max,
@@ -1102,7 +1118,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
             RHS = prod(I.θ[i, l-mu:l+nu-1])
             if !RHS
-                valid_j = (j for j in I.J[s] if is_j_valid[j] && I.γ[i, j])
+                valid_j = (j for j in I.J[s] if is_ij_valid[i, j])
                 fix.(g[i, valid_j, l], 0; force = true)
             else
                 push!(sum_ids, (i, l, (mu, nu)))
@@ -1113,8 +1129,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
             model,
             student_availability[(i, l, key) in sum_ids],
             sum(
-                g[i, j, l] for s in S_stu_ord[i][key] for
-                j in I.J[s] if is_j_valid[j] && I.γ[i, j]
+                g[i, j, l] for s in S_stu_ord[i][key] for j in I.J[s] if is_ij_valid[i, j]
             ) <= 1
         )
     end
@@ -1122,55 +1137,56 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i = 1:I.n_i, l = 1:l_max],
-        sum(g[i, j, l] for j in valid_j if I.γ[i, j]) <= 1
+        student_one_exam_1[i in valid_i, l = 1:l_max],
+        sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j]) <= 1
     )
 
 
     # Student one exam 2
     let
-        μ_max_stu =
-            [maximum(I.μ[I.groups[j].s] for j in valid_j if I.γ[i, j]) for i = 1:I.n_i]
-        ν_min_stu =
-            [minimum(I.ν[I.groups[j].s] for j in valid_j if I.γ[i, j]) for i = 1:I.n_i]
+        μ_max_stu = [
+            maximum(
+                vcat([I.μ[I.groups[j].s] for j in valid_j if is_ij_valid[i, j]], [-Inf]),
+            ) for i = 1:I.n_i
+        ]
+        ν_min_stu = [
+            minimum(
+                vcat([I.ν[I.groups[j].s] for j in valid_j if is_ij_valid[i, j]], [Inf]),
+            ) for i = 1:I.n_i
+        ]
 
         M(i, nu, d, l) =
-            sum(I.γ[i, :]) *
+            sum(is_ij_valid[i, :]) *
             ceil((min(nu - 1 + I.τ_stu + μ_max_stu[i], I.L[d][end] - l)) / ν_min_stu[i])
 
         @constraint(
             model,
             student_one_exam_2[
-                i = 1:I.n_i,
+                i in valid_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
                 d = 1:d_max,
                 l in I.L[d],
             ],
             sum(
-                g[i, k, l+t] for k in valid_j if I.γ[i, k] for
+                g[i, k, l+t] for k in valid_j if is_ij_valid[i, k] for
                 t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l)
             ) <=
-            M(i, nu, d, l) * (
-                1 - sum(
-                    g[i, j, l] for s in valid_s for
-                    j in I.J[s] if is_j_valid[j] && I.γ[i, j]
-                )
-            )
+            M(i, nu, d, l) *
+            (1 - sum(g[i, j, l] for s in valid_s for j in I.J[s] if is_ij_valid[i, j]))
         )
     end
 
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, d = 1:d_max],
-        sum(g[i, j, l] for j = 1:I.n_j if is_j_valid[j] && I.γ[i, j] for l in I.L[d]) <=
-        I.ξ
+        student_max_exams[i in valid_i, d = 1:d_max],
+        sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j] for l in I.L[d]) <= I.ξ
     )
 
     # Exam needed
     @constraint(
         model,
-        exam_needed[j in SplitI.new_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
+        exam_needed[(i, j) in SplitI.new_exams],
         sum(g[i, j, l] for l = 1:l_max) == 1
     )
 
@@ -1178,7 +1194,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     @constraint(
         model,
         student_hard_constraints_link[j in valid_j, l = 1:l_max],
-        sum(g[i, j, l] for i in (i for i = 1:I.n_i if I.γ[i, j])) / I.η[I.groups[j].s] ==
+        sum(g[i, j, l] for i in valid_i if is_ij_valid[i, j]) / I.η[I.groups[j].s] ==
         f[j, l]
     )
 
