@@ -811,18 +811,14 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     if !isnothing(prev_model)
         prev_f_values = value.(prev_model[:f])
 
-        exam_ids = []
-        rem_ids = []
+        scheduled_ids = []
         for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
-            if isapprox(prev_f_values[j, l], 1)
-                push!(exam_ids, (j, l))
-            else
-                push!(rem_ids, (j, l))
+            if prev_f_values[j, l] >= 0.5
+                push!(scheduled_ids, (j, l))
             end
         end
 
-        fix.([f[j, l] for (j, l) in exam_ids], 1; force = true)
-        fix.([f[j, l] for (j, l) in rem_ids], 0; force = true)
+        fix.([f[j, l] for (j, l) in scheduled_ids], 1; force = true)
     end
 
 
@@ -1186,7 +1182,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Exam needed
     @constraint(
         model,
-        exam_needed[(i, j) in SplitI.new_exams],
+        exam_needed[(i, j) in valid_ij],
         sum(g[i, j, l] for l = 1:l_max) == 1
     )
 
@@ -1220,7 +1216,7 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
     is_jl_valid = zeros(Bool, I.n_j, I.n_l)
     prev_f_values = value.(model_jl[:f])
     for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
-        if isapprox(prev_f_values[j, l], 1)
+        if prev_f_values[j, l] >= 0.5
             is_jl_valid[j, l] = true
         end
     end
@@ -1319,8 +1315,8 @@ function declare_RSD_ijlm(I::Instance, model_jlm::Model, model_ijlm::Model)
     # Valid indexes identification
     dict_b = value.(model_jlm[:b]).data
     is_jlm_valid = zeros(Bool, I.n_j, I.n_l, I.n_m)
-    for ((j, l, m), value) in value.(model_jlm[:b]).data
-        if isapprox(value, 1)
+    for ((j, l, m), value) in dict_b
+        if value >= 0.5
             is_jlm_valid[j, l, m] = true
         end
     end
@@ -1351,25 +1347,88 @@ function declare_RSD_ijlm(I::Instance, model_jlm::Model, model_ijlm::Model)
         I.η[I.groups[j].s]
     )
 
+    # Subjects that student i has to take, classified by preparation and presentation time
+    S_stu_ord = [Dict{Tuple{Int,Int},Vector{Int}}() for i = 1:I.n_i]
+    for i = 1:I.n_i, j = 1:I.n_j
+        if I.γ[i, j]
+            s = I.groups[j].s
+            if !haskey(S_stu_ord[i], (I.μ[s], I.ν[s]))
+                S_stu_ord[i][(I.μ[s], I.ν[s])] = []
+            end
+            push!(S_stu_ord[i][(I.μ[s], I.ν[s])], s)
+        end
+    end
+
     # Student availability
     let
-        sum_ids = Set{Tuple{Int,Int,Int}}()
-        for i = 1:I.n_i, s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
-            RHS = prod(I.θ[i, l-I.μ[s]:l+I.ν[s]-1])
+        sum_ids = Set{Tuple{Int,Int,Tuple{Int,Int}}}()
+        for i = 1:I.n_i,
+            ((mu, nu), value) in S_stu_ord[i],
+            s in value,
+            d = 1:I.n_d,
+            l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+
+            RHS = prod(I.θ[i, l-mu:l+nu-1])
             if !RHS
                 valid_jm =
                     [(j, m) for j in I.J[s], m = 1:I.n_m if is_ijlm_valid[i, j, l, m]]
                 fix.([x[i, j, l, m] for (j, m) in valid_jm], 0; force = true)
             else
-                push!(sum_ids, (i, s, l))
+                push!(sum_ids, (i, l, (mu, nu)))
             end
         end
 
         @constraint(
             model_ijlm,
-            student_availability[(i, s, l) in sum_ids],
-            sum(x[i, j, l, m] for j in I.J[s], m = 1:I.n_m if is_ijlm_valid[i, j, l, m]) <=
-            1
+            student_availability[(i, l, key) in sum_ids],
+            sum(
+                x[i, j, l, m] for s in S_stu_ord[i][key] for
+                j in I.J[s], m = 1:I.n_m if is_ijlm_valid[i, j, l, m]
+            ) <= 1
+        )
+    end
+
+    # Student one exam 1
+    @constraint(
+        model_ijlm,
+        student_one_exam_1[i = 1:I.n_i, l = 1:I.n_l],
+        sum(x[i, j, l, m] for j = 1:I.n_j, m = 1:I.n_m if is_ijlm_valid[i, j, l, m]) <= 1
+    )
+
+    # Student one exam 2
+    let
+        μ_max_stu = [
+            maximum(vcat([I.μ[I.groups[j].s] for j = 1:I.n_j if I.γ[i, j]], [-Inf])) for
+            i = 1:I.n_i
+        ]
+        ν_min_stu = [
+            minimum(vcat([I.ν[I.groups[j].s] for j = 1:I.n_j if I.γ[i, j]], [Inf])) for
+            i = 1:I.n_i
+        ]
+
+        M(i, nu, d, l) =
+            sum(I.γ[i, :]) *
+            ceil((min(nu - 1 + I.τ_stu + μ_max_stu[i], I.L[d][end] - l)) / ν_min_stu[i])
+
+        @constraint(
+            model_ijlm,
+            student_one_exam_2[
+                i = 1:I.n_i,
+                ((mu, nu), valid_s) in S_stu_ord[i],
+                d = 1:I.n_d,
+                l in I.L[d],
+            ],
+            sum(
+                x[i, k, l+t, m] for k = 1:I.n_j if I.γ[i, k] for
+                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l),
+                m = 1:I.n_m if is_ijlm_valid[i, k, l+t, m]
+            ) <=
+            M(i, nu, d, l) * (
+                1 - sum(
+                    x[i, j, l, m] for s in valid_s for j in I.J[s] if I.γ[i, j] for
+                    m = 1:I.n_m if is_ijlm_valid[i, j, l, m]
+                )
+            )
         )
     end
 

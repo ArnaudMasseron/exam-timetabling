@@ -358,6 +358,21 @@ function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
         r[j, split] * I.η[I.groups[j].s]
     )
 
+    # Student enough time
+    @constraint(
+        model,
+        student_enough_time[i = 1:I.n_i, split = 1:n_splits],
+        sum(
+            let s = I.groups[exams[exam][2]].s
+                x[exam, split] * (I.ν[s] + I.μ[s] + I.τ_stu)
+            end for exam = 1:n_exams if i == exams[exam][1]
+        ) <=
+        fill_rate * (
+            sum(length(I.L[d]) for d in days_split[split]) -
+            sum(!I.θ[i, l] for d in days_split[split] for l in I.L[d])
+        )
+    )
+
     # Student max exams
     @constraint(
         model,
@@ -367,6 +382,32 @@ function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
     )
 
     # Examiner enough time
+    @variable(model, t[e = 1:I.n_e, u = 1:length(I.U[e])], binary = true)
+
+    function helper_examiner_available_time(e, split)
+        expr = zero(AffExpr)
+        for d in days_split[split]
+            add_to_expression!(expr, length(I.L[d]) - I.τ_lun)
+
+            for l in I.L[d]
+                add_to_expression!(expr, -(!I.α[e, l] || !I.β[e, l]))
+            end
+
+            for u in eachindex(I.U[e])
+                @assert issorted(I.U[e][u])
+                for l in I.U[e][u]
+                    idx = searchsortedlast(I.L[d], l)
+                    if idx != 0 && I.L[d] == l
+                        add_to_expression!(expr, length(I.U[e][u]) * t[e, u])
+                        break
+                    end
+                end
+            end
+        end
+        expr *= fill_rate
+
+        return expr
+    end
     @constraint(
         model,
         examiner_enough_time[e = 1:I.n_e, split = 1:n_splits],
@@ -374,7 +415,7 @@ function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
             let s = I.groups[exams[exam][2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
             end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
-        ) <= fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split])
+        ) <= helper_examiner_available_time(e, split)
     )
 
     # Examiner max exams
