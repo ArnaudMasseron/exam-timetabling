@@ -390,11 +390,14 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # --- Objective function --- #
-    y_coef = 30 / I.n_i
-    q_coef = 30 / (I.n_e * I.n_l)
-    w_coef = 30 / I.n_e
-    z_coef = 30 / (I.n_j * I.n_l * I.n_m)
-    Rr_coef = 30 / (I.n_e * I.n_d)
+    length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+    y_coef = 30 / sum(I.ε)
+    q_coef = 30 / sum(I.β)
+    w_coef = 30 / sum(I.κ)
+    z_coef =
+        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j)
+    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ))
 
     objective =
         y_coef * sum(y) +
@@ -769,10 +772,13 @@ function declare_RSD_jl(I::Instance, model::Model)
 
 
     # --- Objective function --- #
-    q_coef = 30 / (I.n_e * I.n_l)
-    w_coef = 30 / I.n_e
-    z_coef = 30 / (I.n_j * I.n_l)
-    Rr_coef = 30 / (I.n_e * I.n_d)
+    length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+    q_coef = 30 / sum(I.β)
+    w_coef = 30 / sum(I.κ)
+    z_coef =
+        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j)
+    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ))
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
@@ -1196,10 +1202,16 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
 
     # --- Objective function --- #
-    q_coef = 30 / (I.n_e * l_max)
-    w_coef = 30 / I.n_e
-    z_coef = 30 / (I.n_j * l_max)
-    Rr_coef = 30 / (I.n_e * d_max)
+    length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+    q_coef = 30 / sum(I.β[e, l] for e in valid_e, l = 1:l_max)
+    w_coef = 30 / sum(I.κ[e] for e in valid_e)
+    z_coef =
+        30 / sum(
+            l_max / length_one_exam(I.groups[j].s) *
+            sum(is_ij_valid[i, j] for i in valid_i) for j in valid_j
+        )
+    Rr_coef = 30 / (l_max / d_max * sum(I.κ[e] for e in valid_e))
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
@@ -1464,6 +1476,6 @@ function declare_RSD_ijlm(I::Instance, model_jlm::Model, model_ijlm::Model)
 
 
     # Objective
-    y_coef = 30 / I.n_i
+    y_coef = 30 / sum(I.ε)
     @objective(model_ijlm, Min, y_coef * sum(y))
 end
