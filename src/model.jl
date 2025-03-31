@@ -784,11 +784,11 @@ function declare_RSD_jl(I::Instance, model::Model)
     @objective(model, Min, objective)
 end
 
-function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = nothing)
+function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     I = SplitI.I
-    d_max = SplitI.d_max
-    l_max = I.L[d_max][end]
-    valid_ij = union(SplitI.scheduled_exams, SplitI.new_exams)
+    d_range = SplitI.day_range
+    l_range = I.L[d_range[1]][1]:I.L[d_range[end]][end]
+    valid_ij = SplitI.new_exams
 
     valid_i = Set{Int}()
     valid_j = Set{Int}()
@@ -809,28 +809,12 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     end
 
     # --- Main decision variables --- #
-    @variable(model, f[j in valid_j, l = 1:l_max], binary = true)
-
-
-    # --- General constraints --- #
-    # Declare the exams that were already scheduled
-    if !isnothing(prev_model)
-        prev_f_values = value.(prev_model[:f])
-
-        scheduled_ids = []
-        for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
-            if prev_f_values[j, l] >= 0.5
-                push!(scheduled_ids, (j, l))
-            end
-        end
-
-        fix.([f[j, l] for (j, l) in scheduled_ids], 1; force = true)
-    end
+    @variable(model, f[j in valid_j, l = l_range], binary = true)
 
 
     # --- Group related constraints --- #
     # Group availability
-    @variable(model, 0 <= q[e in valid_e, l = 1:l_max] <= 1)
+    @variable(model, 0 <= q[e in valid_e, l = l_range] <= 1)
     let
         M(j) = length(I.groups[j].e)
 
@@ -838,7 +822,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         for s = 1:I.n_s,
             j in (j for j in I.J[s] if is_j_valid[j]),
             e in I.groups[j].e,
-            d = 1:d_max,
+            d in d_range,
             l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
 
             one_alpha_null = !prod(I.α[e, l-I.μ[s]:l+I.ν[s]-1])
@@ -858,7 +842,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
     # Remove useless q
     let
-        fix_ids = [(e, l) for e in valid_e, l = 1:l_max if !I.α[e, l] || I.β[e, l]]
+        fix_ids = [(e, l) for e in valid_e, l in l_range if !I.α[e, l] || I.β[e, l]]
         fix.([q[e, l] for (e, l) in fix_ids], 0; force = true)
     end
 
@@ -868,7 +852,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         group_one_block_cancelation[
             e in valid_e,
             P in I.U[e],
-            a in (a for a = 1:lastindex(P)-1 if P[a+1] <= l_max),
+            a in (a for a = 1:lastindex(P)-1 if l_range[1] <= P[a] && P[a+1] <= l_range[end]),
         ],
         q[e, P[a]] == q[e, P[a+1]],
     )
@@ -881,7 +865,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
             group_one_exam[
                 s in (s for s = 1:I.n_s if I.ν[s] > 1),
                 j in (j for j in I.J[s] if is_j_valid[j]),
-                d = 1:d_max,
+                d = d_range,
                 l in I.L[d][1:end-(I.ν[s]-1)],
             ],
             sum(f[j, l+t] for t = 1:I.ν[s]-1) <= M * (1 - f[j, l])
@@ -889,13 +873,13 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     end
 
     # Examiner lunch break 1
-    @variable(model, b[e in valid_e, l in vcat(I.V[1:d_max]...)], binary = true)
+    @variable(model, b[e in valid_e, l in vcat(I.V[d_range]...)], binary = true)
     let
         M = [ceil((I.μ[s] + I.τ_lun - 1 - (-I.ν[s] + 1) + 1) / I.ν[s]) for s = 1:I.n_s]
 
         @constraint(
             model,
-            examiner_lunch_break_1[j in valid_j, d = 1:d_max, l in I.V[d]],
+            examiner_lunch_break_1[j in valid_j, d = d_range, l in I.V[d]],
             sum(
                 f[j, l+t] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
@@ -909,7 +893,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Examiner lunch break 2
     @constraint(
         model,
-        examiner_lunch_break_2[e in valid_e, d = 1:d_max],
+        examiner_lunch_break_2[e in valid_e, d = d_range],
         sum(b[e, l] for l in I.V[d]) >= 1
     )
 
@@ -930,7 +914,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
         @constraint(
             model,
-            group_switch_break[j in valid_j, d = 1:d_max, l in I.L[d]],
+            group_switch_break[j in valid_j, d = d_range, l in I.L[d]],
             sum(
                 f[k, l+t] for k in valid_j if k != j && I.σ[j, k] for t =
                     0:min(
@@ -944,17 +928,17 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Examiner max exams
     @constraint(
         model,
-        examiner_max_exams[e in valid_e, d = 1:d_max],
+        examiner_max_exams[e in valid_e, d = d_range],
         sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]) <= I.ζ[e]
     )
 
     # Group max days 1
-    @variable(model, v[e in valid_e, d = 1:d_max], binary = true)
+    @variable(model, v[e in valid_e, d = d_range], binary = true)
     let
         M(d) = length(I.L[d])
         @constraint(
             model,
-            group_max_days_1[d = 1:d_max, e in valid_e],
+            group_max_days_1[d = d_range, e in valid_e],
             sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]) <= M(d) * v[e, d]
         )
     end
@@ -964,31 +948,31 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     @constraint(
         model,
         group_max_days_2_1[e in valid_e],
-        sum(v[e, d] for d = 1:d_max) <= 1 + w[e]
+        sum(v[e, d] for d in d_range) <= 1 + w[e]
     )
-    @constraint(model, group_max_days_2_2[e in valid_e], 1 + w[e] <= I.κ[e])
+    @constraint(model, group_max_days_2_2[e in valid_e], 1 + w[e] <= SplitI.κ[e])
 
     # Exam grouped
-    @variable(model, r[e in valid_e, d = 1:d_max] >= I.L[d][1])
-    @variable(model, R[e in valid_e, d = 1:d_max] <= I.L[d][end])
+    @variable(model, r[e in valid_e, d = d_range] >= I.L[d][1])
+    @variable(model, R[e in valid_e, d = d_range] <= I.L[d][end])
     @constraint(
         model,
-        exam_grouped_1[j in valid_j, e in I.groups[j].e, d = 1:d_max, l in I.L[d]],
+        exam_grouped_1[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
         r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
     )
     @constraint(
         model,
-        exam_grouped_2[j in valid_j, e in I.groups[j].e, d = 1:d_max, l in I.L[d]],
+        exam_grouped_2[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
         R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
-    @constraint(model, exam_grouped_3[e in valid_e, d = 1:d_max], r[e, d] <= R[e, d])
+    @constraint(model, exam_grouped_3[e in valid_e, d = d_range], r[e, d] <= R[e, d])
 
 
     # --- Exam related constraints --- #
     # Exam start and end
     fix.(
         [
-            f[j, l] for j in valid_j, d = 1:d_max for
+            f[j, l] for j in valid_j, d in d_range for
             l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][end-I.ν[I.groups[j].s]-1:end])
         ],
         0;
@@ -996,15 +980,15 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     )
 
     # Exam continuity 3
-    @variable(model, z[j in valid_j, l = 1:l_max] >= 0)
+    @variable(model, z[j in valid_j, l = l_range] >= 0)
 
     # Exam continuity 1
-    @variable(model, z_tilde[j in valid_j, l = 1:l_max], binary = true)
+    @variable(model, z_tilde[j in valid_j, l = l_range], binary = true)
     @constraint(
         model,
         exam_continuity_1_1[
             j in valid_j,
-            d = 1:d_max,
+            d = d_range,
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         z_tilde[j, l] <=
@@ -1014,7 +998,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         model,
         exam_continuity_1_2[
             j in valid_j,
-            d = 1:d_max,
+            d = d_range,
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         sum(1 - f[j, l-t] for t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s])) <=
@@ -1024,7 +1008,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         model,
         exam_continuity_1_3[
             j in valid_j,
-            d = 1:d_max,
+            d = d_range,
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l] + z_tilde[j, l]
@@ -1035,7 +1019,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         model,
         exam_continuity_2[
             j in valid_j,
-            d = 1:d_max,
+            d = d_range,
             l in I.L[d][1+I.ν[I.groups[j].s]:I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l]
@@ -1049,7 +1033,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
             model,
             exam_break[
                 j in valid_j,
-                d = 1:d_max,
+                d = d_range,
                 l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
             ],
             sum(f[j, l+t] for t = 0:min(I.L[d][end] - l, I.τ_seq + I.μ[I.groups[j].s])) <=
@@ -1063,7 +1047,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
 
     # --- Room related constraints --- #
     # Room occupation 1
-    @variable(model, h[j in valid_j, l = 1:l_max], binary = true)
+    @variable(model, h[j in valid_j, l = l_range], binary = true)
     let
         M = [I.ν[s] + max(I.τ_seq, I.τ_room) - 1 + I.μ[s] + 1 for s = 1:I.n_s]
 
@@ -1071,7 +1055,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
             model,
             room_occupation_1[
                 j in valid_j,
-                d = 1:d_max,
+                d = d_range,
                 l in I.L[d][I.μ[I.groups[j].s]+1:end-I.ν[I.groups[j].s]],
             ],
             sum(
@@ -1087,7 +1071,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[s = 1:I.n_s, l = 1:l_max],
+        room_occupation_2[s = 1:I.n_s, l = l_range],
         sum(h[j, l] for j in (j for j in I.J[s] if is_j_valid[j])) <= sum(I.δ[:, l, s])
     )
 
@@ -1095,7 +1079,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # --- Student related constraints --- #
     @variable(
         model,
-        g[i = 1:I.n_i, j = 1:I.n_j, l = 1:l_max; is_ij_valid[i, j]],
+        g[i = 1:I.n_i, j = 1:I.n_j, l = l_range; is_ij_valid[i, j]],
         binary = true
     )
 
@@ -1115,7 +1099,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
         for i in valid_i,
             ((mu, nu), value) in S_stu_ord[i],
             s in value,
-            d = 1:d_max,
+            d in d_range,
             l in I.L[d][1+mu:end-(nu-1)]
 
             RHS = prod(I.θ[i, l-mu:l+nu-1])
@@ -1139,7 +1123,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i in valid_i, l = 1:l_max],
+        student_one_exam_1[i in valid_i, l = l_range],
         sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j]) <= 1
     )
 
@@ -1166,7 +1150,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
             student_one_exam_2[
                 i in valid_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
-                d = 1:d_max,
+                d = d_range,
                 l in I.L[d],
             ],
             sum(
@@ -1181,7 +1165,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i in valid_i, d = 1:d_max],
+        student_max_exams[i in valid_i, d = d_range],
         sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j] for l in I.L[d]) <= I.ξ
     )
 
@@ -1189,13 +1173,13 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     @constraint(
         model,
         exam_needed[(i, j) in valid_ij],
-        sum(g[i, j, l] for l = 1:l_max) == 1
+        sum(g[i, j, l] for l in l_range) == 1
     )
 
     # Student hard constraints link
     @constraint(
         model,
-        student_hard_constraints_link[j in valid_j, l = 1:l_max],
+        student_hard_constraints_link[j in valid_j, l = l_range],
         sum(g[i, j, l] for i in valid_i if is_ij_valid[i, j]) / I.η[I.groups[j].s] ==
         f[j, l]
     )
@@ -1204,31 +1188,29 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model, prev_model = 
     # --- Objective function --- #
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
 
-    q_coef = 30 / sum(I.β[e, l] for e in valid_e, l = 1:l_max)
-    w_coef = 30 / sum(I.κ[e] for e in valid_e)
+    q_coef = 30 / sum(I.β[e, l] for e in valid_e, l in l_range)
+    w_coef = 30 / sum(SplitI.κ[e] for e in valid_e)
     z_coef =
         30 / sum(
-            l_max / length_one_exam(I.groups[j].s) *
+            length(l_range) / length_one_exam(I.groups[j].s) *
             sum(is_ij_valid[i, j] for i in valid_i) for j in valid_j
         )
-    Rr_coef = 30 / (l_max / d_max * sum(I.κ[e] for e in valid_e))
+    Rr_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e))
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
 end
 
-function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
+function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
     #=
     [input] I: instance
-    [input] model_jl: RSD_jl submodel that has been solved
+    [input] f_values: values of the variable f of a solved RSD_jl submodel
     [output] model_jlm: RSD_jlm submodel that has not been solved
     =#
-    @assert has_values(model_jl) "The given RSD_jl submodel must have values"
 
     is_jl_valid = zeros(Bool, I.n_j, I.n_l)
-    prev_f_values = value.(model_jl[:f])
-    for j in axes(prev_f_values)[1], l in axes(prev_f_values)[2]
-        if prev_f_values[j, l] >= 0.5
+    for j in axes(f_values)[1], l in axes(f_values)[2]
+        if f_values[j, l]
             is_jl_valid[j, l] = true
         end
     end
@@ -1274,7 +1256,7 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
     # Room group occupation
     let
         a(s, u) = I.ν[s] - 1 + I.τ_room + I.μ[u]
-        M(s, u) = ceil((a(s, u)) / I.ν[u])
+        M(s, u) = ceil((a(s, u) + 1) / I.ν[u])
 
         @constraint(
             model_jlm,
@@ -1316,19 +1298,17 @@ function declare_RSD_jlm(I::Instance, model_jl::Model, model_jlm::Model)
     end
 end
 
-function declare_RSD_ijlm(I::Instance, model_jlm::Model, model_ijlm::Model)
+function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Model)
     #=
     [input] I: instance
-    [input] model_jlm: RSD_jlm submodel that has been solved
+    [input] b_values: values of the variable b in a solved RSD_jlm submodel
     [output] model_ijlm: RSD_ijlm submodel that has not been solved
     =#
-    @assert has_values(model_jlm) "The given RSD_jlm submodel must have values"
 
     # Valid indexes identification
-    dict_b = value.(model_jlm[:b]).data
     is_jlm_valid = zeros(Bool, I.n_j, I.n_l, I.n_m)
-    for ((j, l, m), value) in dict_b
-        if value >= 0.5
+    for j in axes(b_values)[1], l in axes(b_values)[2], m in axes(b_values)[3]
+        if b_values[j, l, m]
             is_jlm_valid[j, l, m] = true
         end
     end

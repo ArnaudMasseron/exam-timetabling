@@ -316,20 +316,27 @@ end
 Base.@kwdef struct SplitInstance
     I::Instance
 
-    d_max::Int
+    κ::Vector{Int}
+    day_range::UnitRange{Int}
     scheduled_exams::Set{Tuple{Int,Int}}
     new_exams::Set{Tuple{Int,Int}}
 end
 
-function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
+include(String(@__DIR__) * "/../src/utils.jl")
+function split_instance(
+    I::Instance,
+    n_splits::Int;
+    fill_rate = 0.85,
+    time_limit_sec = nothing,
+)
     #= Solve the splitting MILP problem =#
     @assert n_splits <= I.n_d "Can't have more splits than the number of days"
 
     # Initialize some data
     day_step = div(I.n_d, n_splits)
     days_split = vcat(
-        [Vector((split-1)*day_step+1:split*day_step) for split = 1:n_splits-1],
-        [Vector(day_step*(n_splits-1)+1:I.n_d)],
+        [(split-1)*day_step+1:split*day_step for split = 1:n_splits-1],
+        [day_step*(n_splits-1)+1:I.n_d],
     )
 
     exams = [(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]]
@@ -489,14 +496,24 @@ function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
 
 
     # --- Objective --- #
-    p_coef = 70 / n_exams
-    q_coef = 30 / n_exams
-    objective = p_coef * sum(p) + q_coef * sum(q)
+    z_coef = 50 / sum(I.κ)
+    p_coef = 30 / n_exams
+    q_coef = 20 / n_exams
+    objective = z_coef * sum(z) + p_coef * sum(p) + q_coef * sum(q)
     @objective(model, Min, objective)
 
+    if !isnothing(time_limit_sec)
+        set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
+    end
 
     # Solve MILP and retrieve results
     optimize!(model)
+
+    # If the model is infeasible the print the problematic constraints
+    if termination_status(model) == MOI.INFEASIBLE_OR_UNBOUNDED
+        print_constraint_conflicts(model)
+        error("Unable to split the instance")
+    end
 
     exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
     for exam = 1:n_exams, split = 1:n_splits
@@ -507,14 +524,39 @@ function split_instance(I::Instance, n_splits::Int; fill_rate = 0.85)
 
     # Create the instances
     day_step = div(I.n_d, n_splits)
-    split_instances = [
-        SplitInstance(
-            I = I,
-            d_max = (split_id != n_splits ? split_id * day_step : I.n_d),
-            scheduled_exams = (split_id != 1 ? union(exam_splits[1:split_id-1]...) : Set()),
-            new_exams = exam_splits[split_id],
-        ) for split_id = 1:n_splits
-    ]
+    x_values = value.(x)
+    split_instances = []
+    for split_id = 1:n_splits
+        nb_exams_examiner = zeros(Float64, I.n_e)
+        for exam = 1:n_exams
+            if x_values[exam, split_id] >= 0.5
+                j = exams[exam][2]
+                for e in I.groups[j].e
+                    nb_exams_examiner[e] += 1 / I.η[I.groups[j].s]
+                end
+            end
+        end
+        κ = [
+            max(
+                sum(value.(z[e, :])),
+                round(
+                    nb_exams_examiner[e] * I.κ[e] /
+                    sum(I.λ[e, j] && I.γ[i, j] for i = 1:I.n_i, j = 1:I.n_j),
+                ),
+            ) for e = 1:I.n_e
+        ]
+
+        day_range = days_split[split_id]
+        scheduled_exams = nothing
+        if split_id == 1
+            scheduled_exams = Set()
+        else
+            scheduled_exams = union(exam_splits[1:split_id-1]...)
+        end
+        new_exams = exam_splits[split_id]
+
+        push!(split_instances, SplitInstance(; I, κ, day_range, scheduled_exams, new_exams))
+    end
 
     return split_instances
 end
