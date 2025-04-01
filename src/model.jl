@@ -390,14 +390,14 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # --- Objective function --- #
+    # Soft constraints penalty coefficients
+    y_coef = 30 / sum(I.ε) # student harmonious exams
+    q_coef = 30 / sum(I.β) # examiner availability
+    w_coef = 30 / sum(I.κ) # examiner max days
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-
-    y_coef = 30 / sum(I.ε)
-    q_coef = 30 / sum(I.β)
-    w_coef = 30 / sum(I.κ)
     z_coef =
-        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j)
-    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ))
+        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
+    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     objective =
         y_coef * sum(y) +
@@ -772,13 +772,13 @@ function declare_RSD_jl(I::Instance, model::Model)
 
 
     # --- Objective function --- #
+    # Soft constraints penalty coefficients
+    q_coef = 30 / sum(I.β) # examiner availability
+    w_coef = 30 / sum(I.κ) # examiner max days
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-
-    q_coef = 30 / sum(I.β)
-    w_coef = 30 / sum(I.κ)
     z_coef =
-        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j)
-    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ))
+        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
+    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
@@ -1186,16 +1186,16 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
 
     # --- Objective function --- #
+    # Soft constraints penalty coefficients
+    q_coef = 30 / sum(I.β[e, l] for e in valid_e, l in l_range) # examiner availability
+    w_coef = 30 / sum(SplitI.κ[e] for e in valid_e) # examiner max days
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-
-    q_coef = 30 / sum(I.β[e, l] for e in valid_e, l in l_range)
-    w_coef = 30 / sum(SplitI.κ[e] for e in valid_e)
     z_coef =
         30 / sum(
             length(l_range) / length_one_exam(I.groups[j].s) *
             sum(is_ij_valid[i, j] for i in valid_i) for j in valid_j
-        )
-    Rr_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e))
+        ) # exam continuity
+    Rr_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
 
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
     @objective(model, Min, objective)
@@ -1455,7 +1455,9 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
     )
 
 
-    # Objective
-    y_coef = 30 / sum(I.ε)
+    # --- Objective function --- #
+    # Soft constraints penalty coefficients
+    y_coef = 30 / sum(I.ε) # student availability
+
     @objective(model_ijlm, Min, y_coef * sum(y))
 end

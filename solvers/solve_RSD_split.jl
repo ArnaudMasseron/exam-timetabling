@@ -121,7 +121,6 @@ save_name =
     "sol_RSDsplit_" *
     instance_name *
     "_" *
-    "warmstart_" *
     string(n_splits) *
     "splits_" *
     (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
