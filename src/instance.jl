@@ -56,6 +56,14 @@ Base.@kwdef struct Instance
     groups::Vector{Group}
 end
 
+Base.@kwdef struct SplitInstance
+    I::Instance
+
+    κ::Vector{Int}
+    day_range::UnitRange{Int}
+    exams::Set{Tuple{Int,Int}}
+end
+
 function read_instance(path::String)
     @assert endswith(path, ".json")
     dataset = JSON.parsefile(path)
@@ -312,37 +320,16 @@ function read_instance(path::String)
     )
 end
 
-
-Base.@kwdef struct SplitInstance
-    I::Instance
-
-    κ::Vector{Int}
-    day_range::UnitRange{Int}
-    scheduled_exams::Set{Tuple{Int,Int}}
-    new_exams::Set{Tuple{Int,Int}}
-end
-
-include(String(@__DIR__) * "/../src/utils.jl")
-function split_instance(
+function declare_splitting_MILP(
     I::Instance,
-    n_splits::Int;
-    fill_rate = 0.85,
-    time_limit_sec = nothing,
+    n_splits::Int,
+    fill_rate::Float64,
+    n_max_tries::Int,
+    exams::Vector{Tuple{Int,Int}},
+    days_split::Vector{UnitRange{Int}},
+    model::Model,
 )
-    #= Solve the splitting MILP problem =#
-    @assert n_splits <= I.n_d "Can't have more splits than the number of days"
-
-    # Initialize some data
-    day_step = div(I.n_d, n_splits)
-    days_split = vcat(
-        [(split-1)*day_step+1:split*day_step for split = 1:n_splits-1],
-        [day_step*(n_splits-1)+1:I.n_d],
-    )
-
-    exams = [(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]]
     n_exams = length(exams)
-
-    model = Model(Gurobi.Optimizer)
 
     # --- Main decision variables --- #
     @variable(model, x[exam = 1:n_exams, split = 1:n_splits], binary = true)
@@ -471,12 +458,16 @@ function split_instance(
     @constraint(
         model,
         split_harmonious_exams_1[split = 1:n_splits],
-        p[split] >= sum(x[exam, split] for exam = 1:n_exams) - n_exams / n_splits
+        p[split] >=
+        sum(x[exam, split] for exam = 1:n_exams) -
+        n_exams * length(days_split[split]) / I.n_d
     )
     @constraint(
         model,
         split_harmonious_exams_2[split = 1:n_splits],
-        p[split] >= n_exams / n_splits - sum(x[exam, split] for exam = 1:n_exams)
+        p[split] >=
+        n_exams * length(days_split[split]) / I.n_d -
+        sum(x[exam, split] for exam = 1:n_exams)
     )
 
     # Student harmonious exams
@@ -485,13 +476,15 @@ function split_instance(
         model,
         student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) - I.ε[i] / n_splits
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) -
+        I.ε[i] * length(days_split[split]) / I.n_d
     )
     @constraint(
         model,
         student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        I.ε[i] / n_splits - sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i)
+        I.ε[i] * length(days_split[split]) / I.n_d -
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i)
     )
 
 
@@ -501,62 +494,217 @@ function split_instance(
     q_coef = 20 / n_exams
     objective = z_coef * sum(z) + p_coef * sum(p) + q_coef * sum(q)
     @objective(model, Min, objective)
+end
 
+function create_split_instances(
+    I::Instance,
+    exams::Vector{Tuple{Int,Int}},
+    days_split::Vector{UnitRange{Int}},
+    x_values,
+)
+    n_exams = length(exams)
+
+    nb_exams_examiner = zeros(Float64, I.n_e, n_splits)
+    exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
+    for exam = 1:n_exams, split = 1:n_splits
+        if x_values[exam, split] >= 0.5
+            push!(exam_splits[split], exams[exam])
+
+            j = exams[exam][2]
+            for e in I.groups[j].e
+                nb_exams_examiner[e, split] += 1 / I.η[I.groups[j].s]
+            end
+        end
+    end
+
+    # Create the split instance kappa vectors
+    κ_splits = zeros(Int, I.n_e, n_splits)
+    for e = 1:I.n_e
+        nb_total_exams_examiner = sum(I.λ[e, j] && I.γ[i, j] for i = 1:I.n_i, j = 1:I.n_j)
+        nb_days_available_examiner = I.κ[e]
+        exam_perc = nb_exams_examiner[e, :] / nb_total_exams_examiner
+
+        while nb_days_available_examiner > 0
+            days_perc = κ_splits[e, :] / I.κ[e]
+
+            # Compute the days percentage to exam percentage ratio
+            ratio = map(x -> (isnan(x) ? Inf : x), days_perc ./ exam_perc)
+            split_id = argmin(ratio)
+
+            # Add a day to the split with the lowest ratio
+            κ_splits[e, split_id] += 1
+
+            nb_days_available_examiner -= 1
+        end
+
+        # Check if a split containing an exam for e has a maximum days limit of at least 1 for e
+        for split_id = 1:n_splits
+            @assert nb_exams_examiner[e, split_id] == 0 || κ_splits[e, split_id] > 0
+        end
+    end
+
+    # Create the split instances vector
+    split_instances = [
+        SplitInstance(
+            I = I,
+            κ = κ_splits[:, split],
+            day_range = days_split[split],
+            exams = exam_splits[split],
+        ) for split = 1:n_splits
+    ]
+
+    return split_instances
+end
+
+function find_problematic_exams_ids(RSD_jl_split_warm::Model, exams::Vector{Tuple{Int,Int}})
+    @assert issorted(exams)
+
+    # Change exam needed into a soft constraint
+    valid_ij = axes(RSD_jl_split_warm[:exam_needed], 1)
+    delete(RSD_jl_split_warm, RSD_jl_split_warm[:exam_needed].data)
+
+    @variable(RSD_jl_split_warm, c[(i, j) in valid_ij], binary = true)
+    g = RSD_jl_split_warm[:g]
+    println("Just before error")
+    RSD_jl_split_warm[:exam_needed] = @constraint(
+        RSD_jl_split_warm,
+        [(i, j) in valid_ij],
+        sum(g[i, j, :]) == 1 - c[(i, j)]
+    )
+
+    c_coef = 1e6 / length(valid_ij)
+    @objective(RSD_jl_split_warm, Min, c_coef * sum(c))
+
+    # Solve the problem with exam needed as a soft constraint
+    optimize!(RSD_jl_split_warm)
+    @assert termination_status(RSD_jl_split_warm) != MOI.INFEASIBLE_OR_UNBOUNDED "The time limit is too small."
+
+    # Get the indexes of the problematic exams
+    c_values = value.(c)
+    pb_exams_ids = Set{Int}()
+    for (i, j) in axes(c_values, 1)
+        if c_values[(i, j)] >= 0.5
+            exam = searchsortedlast(exams, (i, j))
+            @assert(exam != 0 && exams[exam] == (i, j))
+            push!(pb_exams_ids, exam)
+        end
+    end
+
+    return pb_exams_ids
+end
+
+include(String(@__DIR__) * "/../src/utils.jl")
+function split_instance(
+    I::Instance,
+    n_splits::Int;
+    fill_rate = 0.85,
+    time_limit_sec = nothing,
+    n_max_tries = 5,
+)
+    #= 
+    Split the instance into multiple subinstances until a feasible split has been found 
+
+    Arguments:
+    [input] I: original instance
+    [input] n_splits: number of splits
+    [input] fill_rate: parameter that controls how filled the splits can be
+    [input] time_limit_sec: time limit in seconds for each MILP resolution
+    [input] : maximum number of times where the splitting MILP can be solved
+
+    Return value: (split_instances, g_values_warmstart) 
+    split_instances: Vector{SplitInstance} containing the different subsinstances
+    g_values_warmstart: values of the g variable for the original instance  fter the warmstarts
+    =#
+
+    @assert n_splits <= I.n_d "Can't have more splits than the number of days"
+
+    # Initialize some data
+    day_step = div(I.n_d, n_splits)
+    days_split = vcat(
+        [(split-1)*day_step+1:split*day_step for split = 1:n_splits-1],
+        [day_step*(n_splits-1)+1:I.n_d],
+    )
+
+    exams = sort([(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]])
+    n_exams = length(exams)
+
+    # Declare the splitting model
+    model = Model(Gurobi.Optimizer)
+    declare_splitting_MILP(I, n_splits, fill_rate, n_max_tries, exams, days_split, model)
     if !isnothing(time_limit_sec)
         set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
     end
 
-    # Solve MILP and retrieve results
-    optimize!(model)
+    # Solve the splitting problem until a feasible split has been found
+    feasible_splits_found = false
+    split_instances = nothing
+    g_values_warmstart = nothing
+    banned_x = zeros(Bool, n_exams, n_splits) # banned (exam, split) combinations
+    try_id = 1
+    while !feasible_splits_found && try_id <= n_max_tries
+        # Solve the MILP splitting problem
+        optimize!(model)
 
-    # If the model is infeasible the print the problematic constraints
-    if termination_status(model) == MOI.INFEASIBLE_OR_UNBOUNDED
-        print_constraint_conflicts(model)
-        error("Unable to split the instance")
-    end
-
-    exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
-    for exam = 1:n_exams, split = 1:n_splits
-        if isapprox(value(x[exam, split]), 1)
-            push!(exam_splits[split], exams[exam])
+        # If the model is infeasible the print the problematic constraints
+        if termination_status(model) == MOI.INFEASIBLE_OR_UNBOUNDED
+            print_constraint_conflicts(model)
+            error("Unable to split the instance. 
+                  This can be the result of a time limit that is too small. 
+                  The problematic constraints have been printed.")
         end
-    end
 
-    # Create the instances
-    day_step = div(I.n_d, n_splits)
-    x_values = value.(x)
-    split_instances = []
-    for split_id = 1:n_splits
-        nb_exams_examiner = zeros(Float64, I.n_e)
-        for exam = 1:n_exams
-            if x_values[exam, split_id] >= 0.5
-                j = exams[exam][2]
-                for e in I.groups[j].e
-                    nb_exams_examiner[e] += 1 / I.η[I.groups[j].s]
+        # Read the results
+        x_values = value.(model[:x])
+        split_instances = create_split_instances(I, exams, days_split, x_values)
+
+        # Check if the splits instances are feasible by warmstarting the different splits
+        g_values_warmstart = zeros(Bool, I.n_i, I.n_j, I.n_l)
+        feasible_splits_found = true
+        for (split, SplitI) in enumerate(split_instances)
+            RSD_jl_split_warm = Model(Gurobi.Optimizer)
+            declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
+            @objective(RSD_jl_split_warm, Min, 0)
+            if !isnothing(time_limit_sec)
+                set_optimizer_attribute(RSD_jl_split_warm, "TimeLimit", time_limit_sec)
+            end
+            optimize!(RSD_jl_split_warm)
+
+            # If the split is infeasible then find the exams that cause problem
+            if termination_status(RSD_jl_split_warm) == MOI.INFEASIBLE_OR_UNBOUNDED
+                feasible_splits_found = false
+
+                pb_exams_ids = find_problematic_exams_ids(RSD_jl_split_warm, exams)
+
+                # Ban the problematic exams in the splitting in the splitting MILP
+                for exam in pb_exams_ids
+                    banned_x[exam, split] = true
+                    fix(x[exam, split], 0; force = true)
+                end
+
+                # If one exam has been banned in all splits then the splitting heuristic has failed and can't go on
+                one_exam_banned_everywhere =
+                    sum(
+                        prod(banned_x[exam, split] for split = 1:n_splits) for
+                        exam = 1:n_exams
+                    ) > 0
+                @assert !one_exam_banned_everywhere "One exam can't be placed in any split"
+            else
+                # Get the warmstart values
+                g_values_dict = value.(RSD_jl_split_warm[:g]).data
+                for ((i, j, l), value) in g_values_dict
+                    if value >= 0.5
+                        g_values_warmstart[i, j, l] = true
+                    end
                 end
             end
         end
-        κ = [
-            max(
-                sum(value.(z[e, :])),
-                round(
-                    nb_exams_examiner[e] * I.κ[e] /
-                    sum(I.λ[e, j] && I.γ[i, j] for i = 1:I.n_i, j = 1:I.n_j),
-                ),
-            ) for e = 1:I.n_e
-        ]
 
-        day_range = days_split[split_id]
-        scheduled_exams = nothing
-        if split_id == 1
-            scheduled_exams = Set()
-        else
-            scheduled_exams = union(exam_splits[1:split_id-1]...)
-        end
-        new_exams = exam_splits[split_id]
-
-        push!(split_instances, SplitInstance(; I, κ, day_range, scheduled_exams, new_exams))
+        try_id += 1
     end
 
-    return split_instances
+    if !feasible_splits_found
+        error("No feasible solution has been found in under $n_max_tries tries")
+    end
+
+    return split_instances, g_values_warmstart
 end

@@ -24,6 +24,10 @@ else
     fill_rate = parse(Float64, ARGS[4])
 end
 
+# Print the message by adding dashes before and after
+println_dash(mystring::String) =
+    println(repeat("-", 30) * " " * mystring * " " * repeat("-", 30))
+
 # Read instance
 instance_path =
     repo_path *
@@ -37,84 +41,95 @@ instance = read_instance(instance_path)
 @assert 0 <= fill_rate <= 1 "The filling rate must be between 0 and 1"
 
 # Split the instance into multiple subinstances
-split_instances = split_instance(
+println_dash("Start solving instance splitting model")
+split_instances, g_values_warmstart = split_instance(
     instance,
     n_splits;
     fill_rate = fill_rate,
     time_limit_sec = time_limit_sec,
 )
 
-
 # Solve the split instances
 f_values = zeros(Bool, instance.n_j, instance.n_l)
-RSD_jl = nothing
+println_dash("Start solving RSD_jl_split submodels")
 for SplitI in split_instances
-    global RSD_jl
-    RSD_jl = Model(Gurobi.Optimizer)
-    declare_RSD_jl_split(SplitI, RSD_jl)
-
-    if !isnothing(time_limit_sec)
-        set_optimizer_attribute(RSD_jl, "TimeLimit", time_limit_sec)
+    RSD_jl_split = Model(Gurobi.Optimizer)
+    declare_RSD_jl_split(SplitI, RSD_jl_split)
+    for ((i, j, l), var) in RSD_jl_split[:g].data
+        set_start_value(var, Int(g_values_warmstart[i, j, l]))
     end
 
-    # Warmstart
-    objective = objective_function(RSD_jl)
-    @objective(RSD_jl, Min, 0)
-    optimize!(RSD_jl)
+    if !isnothing(time_limit_sec)
+        set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_sec)
+    end
+    optimize!(RSD_jl_split)
+    @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
 
-    @objective(RSD_jl, Min, objective)
-    optimize!(RSD_jl)
-    @assert termination_status(RSD_jl) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
-
-    curr_f_values = value.(RSD_jl[:f])
+    curr_f_values = value.(RSD_jl_split[:f])
     for j in axes(curr_f_values)[1], l in axes(curr_f_values)[2]
         if curr_f_values[j, l] >= 0.5
             f_values[j, l] = true
         end
     end
-
-    finalize(Gurobi.Optimizer)
 end
 
 
 # Add the rooms
-RSD_jlm = Model(Gurobi.Optimizer)
-declare_RSD_jlm(instance, f_values, RSD_jlm)
-if !isnothing(time_limit_sec)
-    set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_sec)
-end
-optimize!(RSD_jlm)
-
-@assert termination_status(RSD_jlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
 b_values = zeros(Bool, instance.n_j, instance.n_l, instance.n_m)
-let dict_b = value.(RSD_jlm[:b]).data
-    for ((j, l, m), value) in dict_b
+let
+    global b_values
+
+    println_dash("Start solving RSD_jlm submodel")
+    RSD_jlm = Model(Gurobi.Optimizer)
+    declare_RSD_jlm(instance, f_values, RSD_jlm)
+    if !isnothing(time_limit_sec)
+        set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_sec)
+    end
+    optimize!(RSD_jlm)
+
+    @assert termination_status(RSD_jlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+    dict_b_values = value.(RSD_jlm[:b]).data
+    for ((j, l, m), value) in dict_b_values
         if value >= 0.5
             b_values[j, l, m] = true
         end
     end
 end
-finalize(Gurobi.Optimizer)
+
 
 
 # Add the students
-RSD_ijlm = Model(Gurobi.Optimizer)
-declare_RSD_ijlm(instance, b_values, RSD_ijlm)
-if !isnothing(time_limit_sec)
-    set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec)
+x_values = zeros(Bool, instance.n_i, instance.n_j, instance.n_l, instance.n_m)
+let
+    global x_values
+
+    println_dash("Start solving RSD_ijlm submodel")
+    RSD_ijlm = Model(Gurobi.Optimizer)
+    declare_RSD_ijlm(instance, b_values, RSD_ijlm)
+    if !isnothing(time_limit_sec)
+        set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec)
+    end
+
+    # Warmstart
+    objective = objective_function(RSD_ijlm)
+    @objective(RSD_ijlm, Min, 0)
+    optimize!(RSD_ijlm)
+
+    @objective(RSD_ijlm, Min, objective)
+    optimize!(RSD_ijlm)
+    @assert termination_status(RSD_ijlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+
+    dict_x_values = value.(RSD_ijlm[:x]).data
+    for ((i, j, l, m), value) in dict_x_values
+        if value >= 0.5
+            x_values[i, j, l, m] = true
+        end
+    end
 end
-
-# Warmstart
-objective = objective_function(RSD_ijlm)
-@objective(RSD_ijlm, Min, 0)
-optimize!(RSD_ijlm)
-
-@objective(RSD_ijlm, Min, objective)
-optimize!(RSD_ijlm)
-@assert termination_status(RSD_ijlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
 
 
 # Save the solution
+println_dash("Start saving the solution")
 using JLD2
 save_dir = repo_path * "solutions/RSD_split/"
 save_name =

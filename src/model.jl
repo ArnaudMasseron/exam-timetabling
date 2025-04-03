@@ -788,7 +788,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     I = SplitI.I
     d_range = SplitI.day_range
     l_range = I.L[d_range[1]][1]:I.L[d_range[end]][end]
-    valid_ij = SplitI.new_exams
+    valid_ij = SplitI.exams
 
     valid_i = Set{Int}()
     valid_j = Set{Int}()
@@ -1196,16 +1196,16 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             sum(is_ij_valid[i, j] for i in valid_i) for j in valid_j
         ) # exam continuity
     Rr_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
-
     objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
+
     @objective(model, Min, objective)
 end
 
-function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
+function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
     #=
     [input] I: instance
     [input] f_values: values of the variable f of a solved RSD_jl submodel
-    [output] model_jlm: RSD_jlm submodel that has not been solved
+    [output] model: RSD_jlm submodel that has not been solved
     =#
 
     is_jl_valid = zeros(Bool, I.n_j, I.n_l)
@@ -1218,7 +1218,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
 
     # --- Main decision variables --- #
     @variable(
-        model_jlm,
+        model,
         b[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; is_jl_valid[j, l]],
         binary = true
     )
@@ -1227,7 +1227,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
     # --- Constraints --- #
     # Group inside room
     @constraint(
-        model_jlm,
+        model,
         group_inside_room[l = 1:I.n_l, j in (j for j = 1:I.n_j if is_jl_valid[j, l])],
         sum(b[j, l, m] for m = 1:I.n_m) == 1
     )
@@ -1247,7 +1247,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
         end
 
         @constraint(
-            model_jlm,
+            model,
             room_availability[(s, l, m) in sum_ids],
             sum(b[j, l, m] for j in I.J[s] if is_jl_valid[j, l]) <= 1
         )
@@ -1259,7 +1259,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
         M(s, u) = ceil((a(s, u) + 1) / I.ν[u])
 
         @constraint(
-            model_jlm,
+            model,
             room_group_occupation[
                 j = 1:I.n_j,
                 d = 1:I.n_d,
@@ -1279,7 +1279,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
     let
         M = [ceil(I.μ[s] + I.τ_room + 1) / I.ν[s] for s = 1:I.n_s]
         @constraint(
-            model_jlm,
+            model,
             room_switch_break[
                 j in 1:I.n_j,
                 d = 1:I.n_d,
@@ -1298,11 +1298,11 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model_jlm::Model)
     end
 end
 
-function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Model)
+function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     #=
     [input] I: instance
     [input] b_values: values of the variable b in a solved RSD_jlm submodel
-    [output] model_ijlm: RSD_ijlm submodel that has not been solved
+    [output] model: RSD_ijlm submodel that has not been solved
     =#
 
     # Valid indexes identification
@@ -1325,7 +1325,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
 
     # --- Main decision variables --- #
     @variable(
-        model_ijlm,
+        model,
         x[i = 1:I.n_i, j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; is_ijlm_valid[i, j, l, m]],
         binary = true
     )
@@ -1333,7 +1333,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
     # --- Constraints --- #
     # Students with groups
     @constraint(
-        model_ijlm,
+        model,
         students_with_groups[(j, l, m) in valid_jlm],
         sum(x[i, j, l, m] for i = 1:I.n_i if is_ijlm_valid[i, j, l, m]) ==
         I.η[I.groups[j].s]
@@ -1371,7 +1371,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
         end
 
         @constraint(
-            model_ijlm,
+            model,
             student_availability[(i, l, key) in sum_ids],
             sum(
                 x[i, j, l, m] for s in S_stu_ord[i][key] for
@@ -1382,7 +1382,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
 
     # Student one exam 1
     @constraint(
-        model_ijlm,
+        model,
         student_one_exam_1[i = 1:I.n_i, l = 1:I.n_l],
         sum(x[i, j, l, m] for j = 1:I.n_j, m = 1:I.n_m if is_ijlm_valid[i, j, l, m]) <= 1
     )
@@ -1403,7 +1403,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
             ceil((min(nu - 1 + I.τ_stu + μ_max_stu[i], I.L[d][end] - l)) / ν_min_stu[i])
 
         @constraint(
-            model_ijlm,
+            model,
             student_one_exam_2[
                 i = 1:I.n_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
@@ -1426,7 +1426,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
 
     # Student max exams
     @constraint(
-        model_ijlm,
+        model,
         student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
         sum(
             x[i, j, l, m] for
@@ -1435,9 +1435,9 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
     )
 
     # Student harmonious exams
-    @variable(model_ijlm, y[i = 1:I.n_i] >= 0)
+    @variable(model, y[i = 1:I.n_i] >= 0)
     @constraint(
-        model_ijlm,
+        model,
         student_harmonious_exams[i = 1:I.n_i, w = 1:I.n_w],
         sum(
             x[i, j, l, m] for
@@ -1449,7 +1449,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
     # --- Exam related constraints --- #
     # Exam needed
     @constraint(
-        model_ijlm,
+        model,
         exam_needed[j = 1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
         sum(x[i, j, l, m] for l = 1:I.n_l, m = 1:I.n_m if is_ijlm_valid[i, j, l, m]) == 1
     )
@@ -1459,5 +1459,5 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model_ijlm::Mode
     # Soft constraints penalty coefficients
     y_coef = 30 / sum(I.ε) # student availability
 
-    @objective(model_ijlm, Min, y_coef * sum(y))
+    @objective(model, Min, y_coef * sum(y))
 end
