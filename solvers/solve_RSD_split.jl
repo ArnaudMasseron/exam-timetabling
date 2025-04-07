@@ -36,9 +36,8 @@ instance_path =
     ".json"
 instance = read_instance(instance_path)
 
-# Check the values of the given parameters
-@assert n_splits <= instance.n_d "The number of splits must be inferior to the number of days in the instance"
-@assert 0 <= fill_rate <= 1 "The filling rate must be between 0 and 1"
+# Perform basic preliminary infeasibility checks
+check_infeasible_basic(instance)
 
 # Split the instance into multiple subinstances
 println_dash("Start solving instance splitting model")

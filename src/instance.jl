@@ -320,11 +320,66 @@ function read_instance(path::String)
     )
 end
 
+function check_infeasible_basic(I::Instance)
+    #= Perform basic preliminary tests in order to see if an instance is infeasible or not =#
+
+    # Feasible amount of students for exams with multiple simultaneous students
+    for j = 1:I.n_j
+        s = I.groups[j].s
+        if I.η[s] > 1
+            nb_students_group = sum(I.γ[:, j])
+            nb_leftover_students = nb_students_group % I.η[s]
+            @assert nb_leftover_students == 0 "Group $j needs $(I.η[s] - nb_leftover_students) more students"
+        end
+    end
+
+    # Student enough time
+    for i = 1:I.n_i
+        time_needed = 0
+        for j = 1:I.n_j
+            if I.γ[i, j]
+                s = I.groups[j].s
+                length_exam = I.ν[s] + I.μ[s]
+                time_needed += length_exam + I.τ_stu
+            end
+        end
+
+        available_time = I.n_l - sum(.!I.θ[i, :])
+
+        @assert time_needed <= available_time "Not enough time to schedule all of student $(i)'s exams"
+    end
+
+    # Student enough days
+    for i = 1:I.n_i
+        nb_days_needed = sum(I.γ[i, :]) / I.ξ
+        nb_days_available = sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d = 1:I.n_d)
+
+        @assert nb_days_needed <= nb_days_available "Not enough days to schedule all of student $(i)'s exams"
+    end
+
+    # Examiner enough time or days
+    for e = 1:I.n_e
+        time_needed = 0
+        nb_exams = 0
+        for j = 1:I.n_j
+            if I.λ[e, j]
+                nb_exams += 1
+                s = I.groups[j].s
+                time_needed += I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]
+            end
+        end
+        available_time = I.n_l - I.n_d * I.τ_lun - sum(.!I.α[e, :])
+        days_needed = max(ceil(time_needed / available_time), ceil(nb_exams / I.ζ[e]))
+
+        @assert time_needed <= available_time "Not enough time to schedule all of examiner $(e)'s exams"
+        @assert days_needed <= I.κ[e] "Not enough days to schedule all of examiner $(e)'s exams"
+    end
+end
+
 function declare_splitting_MILP(
     I::Instance,
     n_splits::Int,
     fill_rate::Float64,
-    n_max_tries::Int,
     exams::Vector{Tuple{Int,Int}},
     days_split::Vector{UnitRange{Int}},
     model::Model,
@@ -372,7 +427,7 @@ function declare_splitting_MILP(
         model,
         student_max_exams[i = 1:I.n_i, split = 1:n_splits],
         sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) <=
-        length(days_split[split]) * I.ξ
+        sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d in days_split[split]) * I.ξ
     )
 
     # Examiner enough time
@@ -410,16 +465,6 @@ function declare_splitting_MILP(
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
             end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
         ) <= helper_examiner_available_time(e, split)
-    )
-
-    # Examiner max exams
-    @constraint(
-        model,
-        examiner_max_exams[e = 1:I.n_e, split = 1:n_splits],
-        sum(
-            x[exam, split] / I.η[I.groups[exams[exam][2]].s] for
-            exam = 1:n_exams if e in I.groups[exams[exam][2]].e
-        ) <= length(days_split[split]) * I.ζ[e]
     )
 
     # Examiner max days
@@ -617,6 +662,7 @@ function split_instance(
     =#
 
     @assert n_splits <= I.n_d "Can't have more splits than the number of days"
+    @assert 0 <= fill_rate <= 1 "The filling rate must be between 0 and 1"
 
     # Initialize some data
     day_step = div(I.n_d, n_splits)
@@ -630,7 +676,7 @@ function split_instance(
 
     # Declare the splitting model
     model = Model(Gurobi.Optimizer)
-    declare_splitting_MILP(I, n_splits, fill_rate, n_max_tries, exams, days_split, model)
+    declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, model)
     if !isnothing(time_limit_sec)
         set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
     end
