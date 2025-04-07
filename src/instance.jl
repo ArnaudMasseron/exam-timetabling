@@ -1,4 +1,4 @@
-using JSON, Dates
+using JSON, Dates, JuMP, Gurobi
 
 Base.@kwdef struct Group
     e::Vector{Int}
@@ -54,6 +54,9 @@ Base.@kwdef struct Instance
     Z::Vector{Set{Int}}
 
     groups::Vector{Group}
+
+    dataset::Dict{String,Any}
+    timeslots_start_datetime::Vector{DateTime}
 end
 
 Base.@kwdef struct SplitInstance
@@ -77,7 +80,7 @@ function read_instance(path::String)
     n_m = length(dataset["rooms"])
     n_c = length(dataset["classes"])
 
-    timeslots_start_datetime = Vector{DateTime}([])
+    timeslots_start_datetime = Vector{DateTime}()
     for (start_datetime_str, end_datetime_str) in
         dataset["general_parameters"]["exam_time_windows"]
         start_datetime = DateTime(start_datetime_str)
@@ -317,6 +320,8 @@ function read_instance(path::String)
         V,
         Z,
         groups,
+        dataset,
+        timeslots_start_datetime,
     )
 end
 

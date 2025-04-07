@@ -129,7 +129,8 @@ end
 
 # Save the solution
 println_dash("Start saving the solution")
-using JLD2
+include(repo_path * "src/solution.jl")
+
 save_dir = repo_path * "solutions/RSD_split/"
 save_name =
     "sol_RSDsplit_" *
@@ -141,5 +142,6 @@ save_name =
     "TimeLimit_" *
     string(fill_rate) *
     "FillRate" *
-    ".jld2"
-@save save_dir * save_name x_value = value.(RSD_ijlm[:x])
+    ".json"
+
+write_solution_json(instance, x_values, save_dir * save_name)
