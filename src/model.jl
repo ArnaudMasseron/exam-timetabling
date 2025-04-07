@@ -365,7 +365,7 @@ function declare_CM(I::Instance, model::Model)
 
     # Exam break
     let
-        M = [ceil((I.τ_seq + I.μ[s] + 1) / I.ν[s]) for s = 1:I.n_s]
+        M = [ceil((max(I.τ_seq, I.μ[s]) + 1) / I.ν[s]) for s = 1:I.n_s]
         @constraint(
             model,
             exam_break[
@@ -376,7 +376,7 @@ function declare_CM(I::Instance, model::Model)
             ],
             sum(
                 x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for
-                t = 0:min(I.L[d][end] - l, I.τ_seq + I.μ[I.groups[j].s]), m = 1:I.n_m
+                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s])), m = 1:I.n_m
             ) <=
             M[I.groups[j].s] * (
                 I.ρ[I.groups[j].s] -
@@ -623,7 +623,7 @@ function declare_RSD_jl(I::Instance, model::Model)
 
     # Exam break
     let
-        M = [ceil((I.τ_seq + I.μ[s] + 1) / I.ν[s]) for s = 1:I.n_s]
+        M = [ceil((max(I.τ_seq, I.μ[s]) + 1) / I.ν[s]) for s = 1:I.n_s]
 
         @constraint(
             model,
@@ -632,7 +632,9 @@ function declare_RSD_jl(I::Instance, model::Model)
                 d = 1:I.n_d,
                 l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
             ],
-            sum(f[j, l+t] for t = 0:min(I.L[d][end] - l, I.τ_seq + I.μ[I.groups[j].s])) <=
+            sum(
+                f[j, l+t] for t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]))
+            ) <=
             M[I.groups[j].s] * (
                 I.ρ[I.groups[j].s] -
                 sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s])
@@ -1027,7 +1029,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
     # Exam break
     let
-        M = [ceil((I.τ_seq + I.μ[s] + 1) / I.ν[s]) for s = 1:I.n_s]
+        M = [ceil((max(I.τ_seq, I.μ[s]) + 1) / I.ν[s]) for s = 1:I.n_s]
 
         @constraint(
             model,
@@ -1036,7 +1038,9 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
                 d = d_range,
                 l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
             ],
-            sum(f[j, l+t] for t = 0:min(I.L[d][end] - l, I.τ_seq + I.μ[I.groups[j].s])) <=
+            sum(
+                f[j, l+t] for t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]))
+            ) <=
             M[I.groups[j].s] * (
                 I.ρ[I.groups[j].s] -
                 sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s])
