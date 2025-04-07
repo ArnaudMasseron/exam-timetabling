@@ -236,20 +236,18 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Exam grouped
-    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d] >= I.L[d][1])
     @variable(model, R[e = 1:I.n_e, d = 1:I.n_d] <= I.L[d][end])
     @constraint(
         model,
-        exam_grouped_1_and_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
-        [r[e, d], -R[e, d]] .<=
-        [l, -l] .+
-        [I.L[d][end] - l, -I.L[d][1] + l] * (
+        exam_grouped[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        R[e, d] >=
+        l +
+        (I.L[d][1] - l) * (
             1 -
             sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m) /
             I.η[I.groups[j].s]
         )
     )
-    @constraint(model, exam_grouped_1[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Room related constraints --- #
@@ -397,14 +395,14 @@ function declare_CM(I::Instance, model::Model)
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
     z_coef =
         30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
-    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    R_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     objective =
         y_coef * sum(y) +
         q_coef * sum(q) +
         w_coef * sum(w) +
         z_coef * sum(z) +
-        Rr_coef * sum(R .- r)
+        R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d)
     @objective(model, Min, objective)
 end
 
@@ -549,19 +547,12 @@ function declare_RSD_jl(I::Instance, model::Model)
     @constraint(model, group_max_days_2_2[e = 1:I.n_e], 1 + w[e] <= I.κ[e])
 
     # Exam grouped
-    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d] >= I.L[d][1])
     @variable(model, R[e = 1:I.n_e, d = 1:I.n_d] <= I.L[d][end])
-    @constraint(
-        model,
-        exam_grouped_1[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
-        r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
-    )
     @constraint(
         model,
         exam_grouped_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
         R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
-    @constraint(model, exam_grouped_3[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Exam related constraints --- #
@@ -780,9 +771,13 @@ function declare_RSD_jl(I::Instance, model::Model)
     length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
     z_coef =
         30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
-    Rr_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    R_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
-    objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
+    objective =
+        q_coef * sum(q) +
+        w_coef * sum(w) +
+        z_coef * sum(z) +
+        R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d)
     @objective(model, Min, objective)
 end
 
@@ -955,19 +950,12 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     @constraint(model, group_max_days_2_2[e in valid_e], 1 + w[e] <= SplitI.κ[e])
 
     # Exam grouped
-    @variable(model, r[e in valid_e, d = d_range] >= I.L[d][1])
     @variable(model, R[e in valid_e, d = d_range] <= I.L[d][end])
-    @constraint(
-        model,
-        exam_grouped_1[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
-        r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
-    )
     @constraint(
         model,
         exam_grouped_2[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
         R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
-    @constraint(model, exam_grouped_3[e in valid_e, d = d_range], r[e, d] <= R[e, d])
 
 
     # --- Exam related constraints --- #
@@ -1199,9 +1187,13 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             length(l_range) / length_one_exam(I.groups[j].s) *
             sum(is_ij_valid[i, j] for i in valid_i) for j in valid_j
         ) # exam continuity
-    Rr_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
-    objective = q_coef * sum(q) + w_coef * sum(w) + z_coef * sum(z) + Rr_coef * sum(R .- r)
+    R_coef = 30 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
 
+    objective =
+        q_coef * sum(q) +
+        w_coef * sum(w) +
+        z_coef * sum(z) +
+        R_coef * sum(R[e, d] - I.L[d][1] for e in valid_e, d in d_range)
     @objective(model, Min, objective)
 end
 
