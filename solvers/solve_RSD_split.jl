@@ -145,3 +145,4 @@ save_name =
     ".json"
 
 write_solution_json(instance, x_values, save_dir * save_name)
+println_dash("Solution saved")

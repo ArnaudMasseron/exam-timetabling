@@ -29,6 +29,9 @@ function write_solution_json(I::Instance, x_values::Array{Bool,4}, solution_path
             )
             modality = I.dataset["exams"][exam_id]["modality"]
 
+            preparation_time_min = convert(Minute, I.μ[s] * I.Δ_l).value
+            duration_time_min = convert(Minute, I.ν[s] * I.Δ_l).value
+
             exam_entry = Dict(
                 "class_studentName" => student_class_name * "_" * student_name,
                 "examiner_names" => examiner_names,
@@ -38,8 +41,8 @@ function write_solution_json(I::Instance, x_values::Array{Bool,4}, solution_path
                 "date" => date,
                 "start_time" => start_time,
                 "modality" => modality,
-                "preparation_time" => I.μ[s],
-                "duration_time" => I.ν[s],
+                "preparation_time_min" => preparation_time_min,
+                "duration_time_min" => duration_time_min,
             )
             push!(exams, exam_entry)
         end
