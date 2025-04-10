@@ -133,22 +133,23 @@ function declare_CM(I::Instance, model::Model)
     # Examiner lunch break 1
     @variable(model, b[e = 1:I.n_e, l in vcat(I.V...)], binary = true)
     let
-        M(j) =
-            length(I.groups[j].e) * ceil(
-                (I.μ[I.groups[j].s] + I.ν[I.groups[j].s] + I.τ_lun - 1) /
-                I.ν[I.groups[j].s],
-            )
+        M(s) = ceil((I.μ[s] + I.ν[s] + I.τ_lun - 1) / I.ν[s])
 
         @constraint(
             model,
-            examiner_lunch_break_1[j in 1:I.n_j, d = 1:I.n_d, l in I.V[d]],
+            examiner_lunch_break_1[
+                j in 1:I.n_j,
+                e in I.groups[j].e,
+                d = 1:I.n_d,
+                l in I.V[d],
+            ],
             sum(
                 x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     ), m = 1:I.n_m
-            ) <= M(j) * sum(1 - b[e, l] for e in I.groups[j].e)
+            ) / I.η[I.groups[j].s] <= M(I.groups[j].s) * (1 - b[e, l])
         )
     end
 
@@ -473,14 +474,19 @@ function declare_RSD_jl(I::Instance, model::Model)
 
         @constraint(
             model,
-            examiner_lunch_break_1[j in 1:I.n_j, d = 1:I.n_d, l in I.V[d]],
+            examiner_lunch_break_1[
+                j in 1:I.n_j,
+                e in I.groups[j].e,
+                d = 1:I.n_d,
+                l in I.V[d],
+            ],
             sum(
                 f[j, l+t] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     )
-            ) <= M[I.groups[j].s] * sum(1 .- b[e, l] for e in I.groups[j].e)
+            ) <= M[I.groups[j].s] * (1 - b[e, l])
         )
     end
 
@@ -876,14 +882,19 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
         @constraint(
             model,
-            examiner_lunch_break_1[j in valid_j, d = d_range, l in I.V[d]],
+            examiner_lunch_break_1[
+                j in valid_j,
+                e in I.groups[j].e,
+                d = d_range,
+                l in I.V[d],
+            ],
             sum(
                 f[j, l+t] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     )
-            ) <= M[I.groups[j].s] * sum(1 .- b[e, l] for e in I.groups[j].e)
+            ) <= M[I.groups[j].s] * (1 - b[e, l])
         )
     end
 
