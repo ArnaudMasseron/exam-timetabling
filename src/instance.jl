@@ -408,7 +408,7 @@ function declare_splitting_MILP(
     @constraint(
         model,
         group_feasible_amount_students[j = 1:I.n_j, split = 1:n_splits],
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][2] == j) ==
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][2] == j; init = 0) ==
         r[j, split] * I.η[I.groups[j].s]
     )
 
@@ -419,7 +419,8 @@ function declare_splitting_MILP(
         sum(
             let s = I.groups[exams[exam][2]].s
                 x[exam, split] * (I.ν[s] + I.μ[s] + I.τ_stu)
-            end for exam = 1:n_exams if i == exams[exam][1]
+            end for exam = 1:n_exams if i == exams[exam][1];
+            init = 0,
         ) <=
         fill_rate * (
             sum(length(I.L[d]) for d in days_split[split]) -
@@ -431,7 +432,7 @@ function declare_splitting_MILP(
     @constraint(
         model,
         student_max_exams[i = 1:I.n_i, split = 1:n_splits],
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) <=
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0) <=
         sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d in days_split[split]) * I.ξ
     )
 
@@ -468,7 +469,8 @@ function declare_splitting_MILP(
         sum(
             let s = I.groups[exams[exam][2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            init = 0,
         ) <= helper_examiner_available_time(e, split)
     )
 
@@ -483,7 +485,8 @@ function declare_splitting_MILP(
         examiner_max_days_1[e = 1:I.n_e, split = 1:n_splits],
         sum(
             x[exam, split] / I.η[I.groups[exams[exam][2]].s] for
-            exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+            exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            init = 0,
         ) <= z[e, split] * I.ζ[e]
     )
     @constraint(
@@ -492,7 +495,8 @@ function declare_splitting_MILP(
         sum(
             let s = I.groups[exams[exam][2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e
+            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            init = 0,
         ) <=
         z[e, split] * fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split]) /
         length(days_split[split])
@@ -526,7 +530,7 @@ function declare_splitting_MILP(
         model,
         student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i) -
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0) -
         I.ε[i] * length(days_split[split]) / I.n_d
     )
     @constraint(
@@ -534,7 +538,7 @@ function declare_splitting_MILP(
         student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
         I.ε[i] * length(days_split[split]) / I.n_d -
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i)
+        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0)
     )
 
 
