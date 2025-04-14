@@ -626,8 +626,7 @@ function find_problematic_exams_ids(RSD_jl_split_warm::Model, exams::Vector{Tupl
         sum(g[i, j, :]) == 1 - c[(i, j)]
     )
 
-    c_coef = 1e6 / length(valid_ij)
-    @objective(RSD_jl_split_warm, Min, c_coef * sum(c))
+    @objective(RSD_jl_split_warm, Min, sum(c))
 
     # Solve the problem with exam needed as a soft constraint
     optimize!(RSD_jl_split_warm)
