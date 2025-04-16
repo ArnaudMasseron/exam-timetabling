@@ -1,10 +1,12 @@
 # Load packages
-using JuMP, Gurobi
+using JuMP, Gurobi, JLD2
 
 # Load source files
 repo_path = String(@__DIR__) * "/../"
 include(repo_path * "src/instance.jl")
 include(repo_path * "src/model.jl")
+
+save_dir = repo_path * "solutions/RSD_split/"
 
 # Load the arguments given to the script
 instance_name = nothing
@@ -25,8 +27,10 @@ else
 end
 
 # Print the message by adding dashes before and after
-println_dash(mystring::String) =
+function println_dash(mystring::String)
     println(repeat("-", 30) * " " * mystring * " " * repeat("-", 30))
+    flush(stdout)
+end
 
 # Read instance
 instance_path =
@@ -71,6 +75,7 @@ for SplitI in split_instances
         end
     end
 end
+@save save_dir * "debug/f_values.jld2" f_values
 
 
 # Add the rooms
@@ -94,7 +99,7 @@ let
         end
     end
 end
-
+@save save_dir * "debug/b_values.jld2" b_values
 
 
 # Add the students
@@ -130,10 +135,8 @@ end
 # Save the solution
 println_dash("Start saving the solution")
 include(repo_path * "src/solution.jl")
-
-save_dir = repo_path * "solutions/RSD_split/"
-save_name =
-    "sol_RSDsplit_" *
+save_radical =
+    "RSDsplit_" *
     instance_name *
     "_" *
     string(n_splits) *
@@ -141,8 +144,8 @@ save_name =
     (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
     "TimeLimit_" *
     string(fill_rate) *
-    "FillRate" *
-    ".json"
+    "FillRate"
 
-write_solution_json(instance, x_values, save_dir * save_name)
+@save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
+write_solution_json(instance, x_values, save_dir * "json/sol_" * save_radical * ".json")
 println_dash("Solution saved")

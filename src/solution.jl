@@ -4,8 +4,9 @@ function write_solution_json(I::Instance, x_values::Array{Bool,4}, solution_path
     @assert endswith(solution_path, ".json")
 
     exams = []
-    for ((i, j, l, m), value) in zip(Tuple.(keys(x_values)), x_values)
-        if value >= 0.5
+    for cart_id in keys(x_values)
+        if x_values[cart_id] >= 0.5
+            i, j, l, m = Tuple(cart_id)
             s = I.groups[j].s
 
             student_name = I.dataset["students"][i]["name"]
