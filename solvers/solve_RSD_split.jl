@@ -5,6 +5,7 @@ using JuMP, Gurobi, JLD2
 repo_path = String(@__DIR__) * "/../"
 include(repo_path * "src/instance.jl")
 include(repo_path * "src/model.jl")
+include(repo_path * "src/solution.jl")
 
 save_dir = repo_path * "solutions/RSD_split/"
 
@@ -51,6 +52,7 @@ split_instances, g_values_warmstart = split_instance(
     fill_rate = fill_rate,
     time_limit_sec = time_limit_sec,
 )
+
 
 # Solve the split instances
 f_values = zeros(Bool, instance.n_j, instance.n_l)
@@ -130,11 +132,14 @@ let
         end
     end
 end
+@save save_dir * "debug/x_values.jld2" x_values
 
+
+# Reorder the students inside exam series according to their classes
+reorder_students_inside_series(instance, x_values)
 
 # Save the solution
 println_dash("Start saving the solution")
-include(repo_path * "src/solution.jl")
 save_radical =
     "RSDsplit_" *
     instance_name *

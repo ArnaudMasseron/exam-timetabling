@@ -3,7 +3,6 @@ using JSON, Dates, JuMP, Gurobi
 Base.@kwdef struct Group
     e::Vector{Int}
     s::Int
-    c::Int
 end
 
 Base.@kwdef struct Instance
@@ -17,7 +16,6 @@ Base.@kwdef struct Instance
     n_m::Int
     n_d::Int
     n_w::Int
-    n_c::Int
 
     ξ::Int
     τ_lun::Int
@@ -79,7 +77,6 @@ function read_instance(path::String)
     n_s = length(dataset["subjects"])
     n_j = length(dataset["groups"])
     n_m = length(dataset["rooms"])
-    n_c = length(dataset["classes"])
 
     timeslots_start_datetime = Vector{DateTime}()
     for (start_datetime_str, end_datetime_str) in
@@ -256,7 +253,7 @@ function read_instance(path::String)
             push!(S_exa[e], s)
         end
 
-        push!(groups, Group(dict["examiner_ids"], s, dict["class_id"]))
+        push!(groups, Group(dict["examiner_ids"], s))
     end
     σ = zeros(Bool, n_j, n_j)
     for e = 1:n_e
@@ -305,7 +302,6 @@ function read_instance(path::String)
         n_m,
         n_d,
         n_w,
-        n_c,
         ξ,
         τ_lun,
         τ_room,
