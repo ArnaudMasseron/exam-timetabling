@@ -43,7 +43,8 @@ Base.@kwdef struct Instance
 
     σ::Matrix{Bool}
 
-    δ::Array{Bool,3}
+    δ::Matrix{Bool}
+    ψ::Matrix{Bool}
 
     S_exa::Vector{Set{Int}}
     S_stu::Vector{Set{Int}}
@@ -54,7 +55,7 @@ Base.@kwdef struct Instance
     Z::Vector{Set{Int}}
 
     groups::Vector{Group}
-
+    room_type_data::Dict{String,Dict{String,Any}}
     dataset::Dict{String,Any}
     timeslots_start_datetime::Vector{DateTime}
 end
@@ -227,11 +228,19 @@ function read_instance(path::String)
     ρ = -ones(Int, n_s)
     μ = -ones(Int, n_s)
     ν = -ones(Int, n_s)
+    room_type_data = Dict{String,Dict{String,Any}}()
     for (s, dict) in enumerate(dataset["subjects"])
         η[s] = dict["number_of_students"]
         ρ[s] = dict["max_number_exams_row"]
         μ[s] = dict["preparation_time"]
         ν[s] = dict["duration_time"]
+
+        room_type = dict["room_type"]
+        if !haskey(room_type_data, room_type)
+            room_type_data[room_type] =
+                Dict("subjects" => Set{Int}(), "rooms" => Set{Int}())
+        end
+        push!(room_type_data[room_type]["subjects"], s)
     end
 
     λ = zeros(Bool, n_e, n_j)
@@ -258,10 +267,17 @@ function read_instance(path::String)
         end
     end
 
-    δ = ones(Bool, n_m, n_l, n_s)
+    δ = ones(Bool, n_m, n_l)
+    ψ = zeros(Bool, n_m, n_s)
     for (m, dict) in enumerate(dataset["rooms"])
-        for s in dict["unsuported_subjects"], l = 1:n_l
-            δ[m, l, s] = false
+        room_type = dict["type"]
+        if !haskey(room_type_data, room_type)
+            room_type_data[room_type] =
+                Dict("subjects" => Set{Int}(), "rooms" => Set{Int}())
+        end
+        push!(room_type_data[room_type]["rooms"], m)
+        for s in room_type_data[room_type]["subjects"]
+            ψ[m, s] = true
         end
 
         for (start_datetime_str, end_datetime_str) in dict["unavailabilities"]
@@ -272,9 +288,7 @@ function read_instance(path::String)
             while (curr_datetime < end_datetime)
                 l = searchsortedlast(timeslots_start_datetime, curr_datetime)
                 if l != 0
-                    for s = 1:n_s
-                        δ[m, l, s] = false
-                    end
+                    δ[m, l] = false
                 end
                 curr_datetime += Δ_l
             end
@@ -312,6 +326,7 @@ function read_instance(path::String)
         ν,
         σ,
         δ,
+        ψ,
         S_exa,
         S_stu,
         U,
@@ -320,6 +335,7 @@ function read_instance(path::String)
         V,
         Z,
         groups,
+        room_type_data,
         dataset,
         timeslots_start_datetime,
     )

@@ -275,7 +275,7 @@ function declare_CM(I::Instance, model::Model)
     let
         sum_ids = Set{Tuple{Int,Int,Int}}()
         for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)], m = 1:I.n_m
-            RHS = prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1, s])
+            RHS = I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
 
             if !RHS
                 fix.(
@@ -698,8 +698,9 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[s = 1:I.n_s, l = 1:I.n_l],
-        sum(h[j, l] for j in I.J[s]; init = 0) <= sum(I.δ[:, l, s])
+        room_occupation_2[(room_type, dict) in I.room_type_data, l = 1:I.n_l],
+        sum(h[j, l] for s in dict["subjects"] for j in I.J[s]; init = 0) <=
+        sum(I.δ[m, l] for m in dict["rooms"])
     )
 
 
@@ -1115,9 +1116,9 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[s = 1:I.n_s, l = l_range],
-        sum(h[j, l] for j in (j for j in I.J[s] if is_j_valid[j]); init = 0) <=
-        sum(I.δ[:, l, s])
+        room_occupation_2[(room_type, dict) in I.room_type_data, l = l_range],
+        sum(h[j, l] for s in dict["subjects"] for j in I.J[s] if is_j_valid[j]; init = 0) <=
+        sum(I.δ[m, l] for m in dict["rooms"])
     )
 
 
@@ -1292,7 +1293,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
     let
         sum_ids = Set{Tuple{Int,Int,Int}}()
         for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)], m = 1:I.n_m
-            RHS = prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1, s])
+            RHS = I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
 
             if !RHS
                 valid_j = (j for j in I.J[s] if is_jl_valid[j, l])
@@ -1325,7 +1326,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
             ],
             sum(
                 b[k, l+t, m] for
-                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[j].s)) if
+                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s)) if
                 is_jl_valid[k, l+t];
                 init = 0,
             ) <= M(I.groups[j].s, I.groups[k].s) * (1 - b[j, l, m])
