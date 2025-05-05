@@ -50,7 +50,7 @@ split_instances, g_values_warmstart = split_instance(
     instance,
     n_splits;
     fill_rate = fill_rate,
-    time_limit_sec = time_limit_sec,
+    time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec / 10),
 )
 
 
@@ -65,7 +65,7 @@ for SplitI in split_instances
     end
 
     if !isnothing(time_limit_sec)
-        set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_sec)
+        set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_sec * 0.7 / n_splits)
     end
     optimize!(RSD_jl_split)
     @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
@@ -89,7 +89,7 @@ let
     RSD_jlm = Model(Gurobi.Optimizer)
     declare_RSD_jlm(instance, f_values, RSD_jlm)
     if !isnothing(time_limit_sec)
-        set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_sec)
+        set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_sec / 10)
     end
     optimize!(RSD_jlm)
 
@@ -113,7 +113,7 @@ let
     RSD_ijlm = Model(Gurobi.Optimizer)
     declare_RSD_ijlm(instance, b_values, RSD_ijlm)
     if !isnothing(time_limit_sec)
-        set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec)
+        set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec / 10)
     end
 
     # Warmstart
