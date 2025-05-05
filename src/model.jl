@@ -135,7 +135,7 @@ function declare_CM(I::Instance, model::Model)
         sum(
             x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t = 1:I.ν[s]-1, m = 1:I.n_m;
             init = 0,
-        ) <=
+        ) / I.η[s] <=
         1 -
         sum(
             x[i, j, l, m_tilde] for i = 1:I.n_i if I.γ[i, j] for m_tilde = 1:I.n_m;
@@ -181,7 +181,7 @@ function declare_CM(I::Instance, model::Model)
             j = 1:I.n_j,
             k in (k for k = 1:I.n_j if k != j && I.σ[j, k]),
             d = 1:I.n_d,
-            l in I.L[d][1:end-a],
+            l in I.L[d][1:end-(I.ν[I.groups[j].s]-1+I.τ_swi+I.μ[I.groups[k].s])],
             t = 0:min(
                 I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
                 I.L[d][end] - l,
@@ -190,7 +190,7 @@ function declare_CM(I::Instance, model::Model)
         sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
         I.η[I.groups[j].s] +
         sum(x[i, k, l+t, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
-        I.η[I.groups[k].u] <= 1
+        I.η[I.groups[k].s] <= 1
     )
 
     # Examiner max exams
@@ -244,7 +244,7 @@ function declare_CM(I::Instance, model::Model)
                         I.τ_room + I.μ[I.groups[j].s],
                     );
                 init = 0,
-            ) <=
+            ) / I.η[I.groups[j].s] <=
             M(I.groups[j].s) * (
                 1 -
                 sum(
@@ -299,7 +299,7 @@ function declare_CM(I::Instance, model::Model)
     # Room group occupation
     let
         a(s, u) = I.ν[s] - 1 + I.τ_room + I.μ[u]
-        M(s, u) = ceil((a(s, u)) / I.ν[u])
+        M(s, u) = ceil((a(s, u) + 1) / I.ν[u])
 
         @constraint(
             model,
@@ -314,7 +314,7 @@ function declare_CM(I::Instance, model::Model)
                 x[i, k, l+t, m] for i = 1:I.n_i if I.γ[i, k] for
                 t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s));
                 init = 0,
-            ) <=
+            ) / I.η[I.groups[k].s] <=
             M(I.groups[j].s, I.groups[k].s) * (
                 1 -
                 sum(x[i_prime, j, l, m] for i_prime = 1:I.n_i if I.γ[i_prime, j]) /
@@ -399,9 +399,9 @@ function declare_CM(I::Instance, model::Model)
             ],
             sum(
                 x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for
-                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s])), m = 1:I.n_m;
+                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]));
                 init = 0,
-            ) <=
+            ) / I.η[I.groups[j].s] <=
             M[I.groups[j].s] * (
                 I.ρ[I.groups[j].s] -
                 sum(
@@ -1321,7 +1321,11 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
                 j = 1:I.n_j,
                 d = 1:I.n_d,
                 l in (l for l in I.L[d] if is_jl_valid[j, l]),
-                k in (k for k = 1:I.n_j if k != j && is_jl_valid[k, l]),
+                k in (k for k = 1:I.n_j if k != j &&
+                      sum(
+                    is_jl_valid[k, l+t] for
+                    t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s))
+                ) > 0),
                 m = 1:I.n_m,
             ],
             sum(
