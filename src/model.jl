@@ -15,7 +15,7 @@ function declare_CM(I::Instance, model::Model)
         for i = 1:I.n_i, s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
             RHS = prod(I.θ[i, l-I.μ[s]:l+I.ν[s]-1])
             if !RHS
-                valid_j = (j for j in I.J[s] if I.γ[i, j])
+                valid_j = [j for j in I.J[s] if I.γ[i, j]]
                 fix.(x[i, valid_j, l, 1:I.n_m], 0; force = true)
             else
                 push!(sum_ids, (i, s, l))
@@ -730,7 +730,7 @@ function declare_RSD_jl(I::Instance, model::Model)
 
             RHS = prod(I.θ[i, l-mu:l+nu-1])
             if !RHS
-                valid_j = (j for j in I.J[s] if I.γ[i, j])
+                valid_j = [j for j in I.J[s] if I.γ[i, j]]
                 fix.(g[i, valid_j, l], 0; force = true)
             else
                 push!(sum_ids, (i, l, (mu, nu)))
@@ -1150,7 +1150,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
             RHS = prod(I.θ[i, l-mu:l+nu-1])
             if !RHS
-                valid_j = (j for j in I.J[s] if is_ij_valid[i, j])
+                valid_j = [j for j in I.J[s] if is_ij_valid[i, j]]
                 fix.(g[i, valid_j, l], 0; force = true)
             else
                 push!(sum_ids, (i, l, (mu, nu)))
@@ -1296,7 +1296,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
             RHS = I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
 
             if !RHS
-                valid_j = (j for j in I.J[s] if is_jl_valid[j, l])
+                valid_j = [j for j in I.J[s] if is_jl_valid[j, l]]
                 fix.(b[valid_j, l, m], 0; force = true)
             else
                 push!(sum_ids, (s, l, m))
