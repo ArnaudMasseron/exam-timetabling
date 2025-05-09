@@ -1,7 +1,14 @@
 using JSON, XLSX
 
-function write_solution_json(I::Instance, x_values::Array{Bool,4}, solution_path::String)
+function write_solution_json(
+    I::Instance,
+    x_values::Array{Bool,4},
+    unscheduled_exams_ids::Set{Tuple{Int,Int}},
+    solution_path::String,
+)
     @assert endswith(solution_path, ".json")
+
+    solution = Dict{String,Any}()
 
     exams = []
     for cart_id in keys(x_values)
@@ -49,9 +56,42 @@ function write_solution_json(I::Instance, x_values::Array{Bool,4}, solution_path
         end
     end
 
+    unscheduled_exams = []
+    for (i, j) in unscheduled_exams_ids
+        student_name = I.dataset["students"][i]["name"]
+        student_class_id = I.dataset["students"][i]["class_id"]
+        student_class_name = I.dataset["classes"][student_class_id]["acronym"]
+
+        examiner_names = map(e -> I.dataset["examiners"][e]["name"], I.groups[j].e)
+        examiner_acronyms = map(e -> I.dataset["examiners"][e]["acronym"], I.groups[j].e)
+
+        subject_name = I.dataset["subjects"][s]["acronym"]
+
+        exam_id =
+            findfirst(x -> x["student_id"] == i && x["group_id"] == j, I.dataset["exams"])
+        modality = I.dataset["exams"][exam_id]["modality"]
+
+        preparation_time_min = convert(Minute, I.μ[s] * I.Δ_l).value
+        duration_time_min = convert(Minute, I.ν[s] * I.Δ_l).value
+
+        exam_entry = Dict(
+            "class_studentName" => student_class_name * "_" * student_name,
+            "examiner_names" => examiner_names,
+            "examiner_acronyms" => examiner_acronyms,
+            "subject_name" => subject_name,
+            "modality" => modality,
+            "preparation_time_min" => preparation_time_min,
+            "duration_time_min" => duration_time_min,
+        )
+        push!(unscheduled_exams, exam_entry)
+    end
+
+    solution["exams"] = exams
+    solution["unscheduled_exams"] = unscheduled_exams
+
     # Save exams in a json file
     open(solution_path, "w") do file
-        JSON.print(file, exams, 2)
+        JSON.print(file, solution, 2)
     end
 end
 
@@ -490,14 +530,16 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
     R_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
-    objective =
-        y_coef * sum(y) +
-        q_coef * sum(q) +
-        w_coef * sum(w) +
-        z_coef * sum(z) +
-        R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d)
+    detailed_objective = [
+        y_coef * sum(y),
+        q_coef * sum(q),
+        w_coef * sum(w),
+        z_coef * sum(z),
+        R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
+    ]
+    objective = sum(detailed_objective)
 
-    return objective
+    return objective, detailed_objective
 end
 
 function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})

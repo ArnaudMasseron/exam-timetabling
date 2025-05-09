@@ -401,17 +401,15 @@ function declare_splitting_MILP(
     days_split::Vector{UnitRange{Int}},
     model::Model,
 )
-    n_exams = length(exams)
-
     # --- Main decision variables --- #
-    @variable(model, x[exam = 1:n_exams, split = 1:n_splits], binary = true)
+    @variable(model, x[exam in exams, split = 1:n_splits], binary = true)
 
 
     # --- Constraints --- #
     # Exam one split
     @constraint(
         model,
-        exam_one_split[exam in 1:n_exams],
+        exam_one_split[exam in exams],
         sum(x[exam, split] for split = 1:n_splits) == 1
     )
 
@@ -420,7 +418,7 @@ function declare_splitting_MILP(
     @constraint(
         model,
         group_feasible_amount_students[j = 1:I.n_j, split = 1:n_splits],
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][2] == j; init = 0) ==
+        sum(x[exam, split] for exam in exams if exam[2] == j; init = 0) ==
         r[j, split] * I.η[I.groups[j].s]
     )
 
@@ -429,9 +427,9 @@ function declare_splitting_MILP(
         model,
         student_enough_time[i = 1:I.n_i, split = 1:n_splits],
         sum(
-            let s = I.groups[exams[exam][2]].s
+            let s = I.groups[exam[2]].s
                 x[exam, split] * (I.ν[s] + I.μ[s] + I.τ_stu)
-            end for exam = 1:n_exams if i == exams[exam][1];
+            end for exam in exams if i == exam[1];
             init = 0,
         ) <=
         fill_rate * (
@@ -444,7 +442,7 @@ function declare_splitting_MILP(
     @constraint(
         model,
         student_max_exams[i = 1:I.n_i, split = 1:n_splits],
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0) <=
+        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0) <=
         sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d in days_split[split]) * I.ξ
     )
 
@@ -479,9 +477,9 @@ function declare_splitting_MILP(
         model,
         examiner_enough_time[e = 1:I.n_e, split = 1:n_splits],
         sum(
-            let s = I.groups[exams[exam][2]].s
+            let s = I.groups[exam[2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            end for exam in exams if e in I.groups[exam[2]].e;
             init = 0,
         ) <= helper_examiner_available_time(e, split)
     )
@@ -496,8 +494,8 @@ function declare_splitting_MILP(
         model,
         examiner_max_days_1[e = 1:I.n_e, split = 1:n_splits],
         sum(
-            x[exam, split] / I.η[I.groups[exams[exam][2]].s] for
-            exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            x[exam, split] / I.η[I.groups[exam[2]].s] for
+            exam in exams if e in I.groups[exam[2]].e;
             init = 0,
         ) <= z[e, split] * I.ζ[e]
     )
@@ -505,9 +503,9 @@ function declare_splitting_MILP(
         model,
         examiner_max_days_2[e = 1:I.n_e, split = 1:n_splits],
         sum(
-            let s = I.groups[exams[exam][2]].s
+            let s = I.groups[exam[2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam = 1:n_exams if e in I.groups[exams[exam][2]].e;
+            end for exam in exams if e in I.groups[exam[2]].e;
             init = 0,
         ) <=
         z[e, split] * fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split]) /
@@ -525,15 +523,15 @@ function declare_splitting_MILP(
         model,
         split_harmonious_exams_1[split = 1:n_splits],
         p[split] >=
-        sum(x[exam, split] for exam = 1:n_exams) -
-        n_exams * length(days_split[split]) / I.n_d
+        sum(x[exam, split] for exam in exams) -
+        length(exams) * length(days_split[split]) / I.n_d
     )
     @constraint(
         model,
         split_harmonious_exams_2[split = 1:n_splits],
         p[split] >=
-        n_exams * length(days_split[split]) / I.n_d -
-        sum(x[exam, split] for exam = 1:n_exams)
+        length(exams) * length(days_split[split]) / I.n_d -
+        sum(x[exam, split] for exam in exams)
     )
 
     # Student harmonious exams
@@ -542,7 +540,7 @@ function declare_splitting_MILP(
         model,
         student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0) -
+        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0) -
         I.ε[i] * length(days_split[split]) / I.n_d
     )
     @constraint(
@@ -550,14 +548,14 @@ function declare_splitting_MILP(
         student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
         I.ε[i] * length(days_split[split]) / I.n_d -
-        sum(x[exam, split] for exam = 1:n_exams if exams[exam][1] == i; init = 0)
+        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0)
     )
 
 
     # --- Objective --- #
     z_coef = 50 / sum(I.κ)
-    p_coef = 30 / n_exams
-    q_coef = 20 / n_exams
+    p_coef = 30 / length(exams)
+    q_coef = 20 / length(exams)
     objective = z_coef * sum(z) + p_coef * sum(p) + q_coef * sum(q)
     @objective(model, Min, objective)
 end
@@ -568,15 +566,13 @@ function create_split_instances(
     days_split::Vector{UnitRange{Int}},
     x_values,
 )
-    n_exams = length(exams)
-
     nb_exams_examiner = zeros(Float64, I.n_e, n_splits)
     exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
-    for exam = 1:n_exams, split = 1:n_splits
+    for exam in exams, split = 1:n_splits
         if x_values[exam, split] >= 0.5
-            push!(exam_splits[split], exams[exam])
+            push!(exam_splits[split], exam)
 
-            j = exams[exam][2]
+            j = exam[2]
             for e in I.groups[j].e
                 nb_exams_examiner[e, split] += 1 / I.η[I.groups[j].s]
             end
@@ -622,8 +618,7 @@ function create_split_instances(
     return split_instances
 end
 
-function find_problematic_exams_ids(RSD_jl_split_warm::Model, exams::Vector{Tuple{Int,Int}})
-    @assert issorted(exams)
+function find_problematic_exams(RSD_jl_split_warm::Model)
 
     # Change exam needed into a soft constraint
     valid_ij = axes(RSD_jl_split_warm[:exam_needed], 1)
@@ -631,7 +626,6 @@ function find_problematic_exams_ids(RSD_jl_split_warm::Model, exams::Vector{Tupl
 
     @variable(RSD_jl_split_warm, c[(i, j) in valid_ij], binary = true)
     g = RSD_jl_split_warm[:g]
-    println("Just before error")
     RSD_jl_split_warm[:exam_needed] = @constraint(
         RSD_jl_split_warm,
         [(i, j) in valid_ij],
@@ -646,16 +640,14 @@ function find_problematic_exams_ids(RSD_jl_split_warm::Model, exams::Vector{Tupl
 
     # Get the indexes of the problematic exams
     c_values = value.(c)
-    pb_exams_ids = Set{Int}()
+    pb_exams = Set{Tuple{Int,Int}}()
     for (i, j) in axes(c_values, 1)
         if c_values[(i, j)] >= 0.5
-            exam = searchsortedlast(exams, (i, j))
-            @assert(exam != 0 && exams[exam] == (i, j))
-            push!(pb_exams_ids, exam)
+            push!(pb_exams, (i, j))
         end
     end
 
-    return pb_exams_ids
+    return pb_exams
 end
 
 include(String(@__DIR__) * "/../src/utils.jl")
@@ -667,7 +659,9 @@ function split_instance(
     n_max_tries = 5,
 )
     #= 
-    Split the instance into multiple subinstances until a feasible split has been found 
+    Split the instance into multiple subinstances until a feasible split has been found.
+    If some exams can't be placed in any split then they are completely removed from the
+    original instance.
 
     Arguments:
     [input] I: original instance
@@ -705,9 +699,28 @@ function split_instance(
     feasible_splits_found = false
     split_instances = nothing
     g_values_warmstart = nothing
-    banned_x = zeros(Bool, n_exams, n_splits) # banned (exam, split) combinations
+    banned_exams = Dict{Tuple{Int,Int},Set{Int}}() # banned exam => banned splits
+    completely_removed_exams = Set{Tuple{Int,Int}}()
     try_id = 1
     while !feasible_splits_found && try_id <= n_max_tries
+        # Remove exams banned in all splits
+        if !isempty(completely_removed_exams)
+            remaining_exams = setdiff!(exams, completely_removed_exams)
+
+            # Actualise the exam one split constraint
+            delete(model, model[:exam_one_split].data)
+            model[:exam_one_split] = @constraint(
+                model,
+                [exam in remaining_exams],
+                sum(model[:x][exam, split] for split = 1:n_splits) == 1
+            )
+
+            # Remove the exams from the instance
+            for exam in completely_removed_exams
+                I.γ[exam[1], exam[2]] = false
+            end
+        end
+
         # Solve the MILP splitting problem
         optimize!(model)
 
@@ -721,6 +734,7 @@ function split_instance(
 
         # Read the results
         x_values = value.(model[:x])
+        @assert prod(sum(x_values[:, split]) > 0 for split = 1:n_splits)
         split_instances = create_split_instances(I, exams, days_split, x_values)
 
         # Check if the splits instances are feasible by warmstarting the different splits
@@ -739,21 +753,20 @@ function split_instance(
             if termination_status(RSD_jl_split_warm) == MOI.INFEASIBLE_OR_UNBOUNDED
                 feasible_splits_found = false
 
-                pb_exams_ids = find_problematic_exams_ids(RSD_jl_split_warm, exams)
+                pb_exams = find_problematic_exams(RSD_jl_split_warm)
 
                 # Ban the problematic exams in the splitting in the splitting MILP
-                for exam in pb_exams_ids
-                    banned_x[exam, split] = true
-                    fix(x[exam, split], 0; force = true)
-                end
+                for exam in pb_exams
+                    if !haskey(banned_exams, exam)
+                        banned_exams[exam] = Set()
+                    end
+                    push!(banned_exams[exam], split)
+                    fix(model[:x][exam, split], 0; force = true)
 
-                # If one exam has been banned in all splits then the splitting heuristic has failed and can't go on
-                one_exam_banned_everywhere =
-                    sum(
-                        prod(banned_x[exam, split] for split = 1:n_splits) for
-                        exam = 1:n_exams
-                    ) > 0
-                @assert !one_exam_banned_everywhere "One exam can't be placed in any split"
+                    if length(banned_exams[exam]) == n_splits
+                        push!(completely_removed_exams, exam)
+                    end
+                end
             else
                 # Get the warmstart values
                 g_values_dict = value.(RSD_jl_split_warm[:g]).data
@@ -772,5 +785,5 @@ function split_instance(
         error("No feasible solution has been found in under $n_max_tries tries")
     end
 
-    return split_instances, g_values_warmstart
+    return split_instances, g_values_warmstart, completely_removed_exams
 end

@@ -14,14 +14,18 @@ instance_name = nothing
 n_splits = nothing
 time_limit_sec = nothing
 fill_rate = nothing
+save_debug = true
+save_solution = true
 if isempty(ARGS)
-    instance_name = "tiny"
-    n_splits = 3
-    time_limit_sec = nothing
+    instance_name = "business_school"
+    n_splits = 2
+    time_limit_sec = 172
     fill_rate = 0.85
+    save_debug = false
+    save_solution = false
 else
     @assert length(ARGS) == 4 "Incorrect amount of arguments given"
-    instance_name = String(ARGS[1])
+    instance_name = string(ARGS[1])
     n_splits = parse(Int, ARGS[2])
     time_limit_sec = parse(Int, ARGS[3])
     fill_rate = parse(Float64, ARGS[4])
@@ -46,11 +50,12 @@ check_infeasible_basic(instance)
 
 # Split the instance into multiple subinstances
 println_dash("Start solving instance splitting model")
-split_instances, g_values_warmstart = split_instance(
+split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
     n_splits;
     fill_rate = fill_rate,
     time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec / 10),
+    n_max_tries = 3,
 )
 
 
@@ -77,7 +82,9 @@ for SplitI in split_instances
         end
     end
 end
+if save_debug
 @save save_dir * "debug/f_values.jld2" f_values
+end
 
 
 # Add the rooms
@@ -101,7 +108,9 @@ let
         end
     end
 end
+if save_debug
 @save save_dir * "debug/b_values.jld2" b_values
+end
 
 
 # Add the students
@@ -132,13 +141,16 @@ let
         end
     end
 end
+if save_debug
 @save save_dir * "debug/x_values.jld2" x_values
+end
 
 
 # Reorder the students inside exam series according to their classes
 reorder_students_inside_series(instance, x_values)
 
 # Save the solution
+if save_solution
 println_dash("Start saving the solution")
 save_radical =
     "RSDsplit_" *
@@ -152,5 +164,11 @@ save_radical =
     "FillRate"
 
 @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
-write_solution_json(instance, x_values, save_dir * "json/sol_" * save_radical * ".json")
+    write_solution_json(
+        instance,
+        x_values,
+        completely_removed_exams,
+        save_dir * "json/sol_" * save_radical * ".json",
+    )
 println_dash("Solution saved")
+end
