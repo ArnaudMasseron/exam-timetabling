@@ -399,13 +399,23 @@ function declare_splitting_MILP(
     fill_rate::Float64,
     exams::Vector{Tuple{Int,Int}},
     days_split::Vector{UnitRange{Int}},
-    model::Model,
+    model::Model;
+    exam_groups = nothing,
 )
     # --- Main decision variables --- #
     @variable(model, x[exam in exams, split = 1:n_splits], binary = true)
 
 
     # --- Constraints --- #
+    # Students grouped together
+    if !isnothing(exam_groups)
+        @constraint(
+            model,
+            students_grouped_together[exam_group in exam_groups, split = 1:n_splits],
+            [x[exam, split] for exam in exam_group] .== x[first(exam_group), split]
+        )
+    end
+
     # Exam one split
     @constraint(
         model,
@@ -657,6 +667,7 @@ function split_instance(
     fill_rate = 0.9,
     time_limit_sec = nothing,
     n_max_tries = 5,
+    student_groups = nothing,
 )
     #= 
     Split the instance into multiple subinstances until a feasible split has been found.
@@ -686,11 +697,37 @@ function split_instance(
     )
 
     exams = sort([(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]])
-    n_exams = length(exams)
+
+    exam_groups = nothing
+    if !isnothing(student_groups)
+        exam_groups = Vector{Set{Tuple{Int,Int}}}()
+        for stu_group in student_groups
+            first_i = first(stu_group)
+            examiner_groups = (j for j = 1:I.n_j if I.γ[first_i, j])
+
+            for j in examiner_groups
+                push!(exam_groups, Set())
+                for i in stu_group
+                    exam_id = searchsortedlast(exams, (i, j))
+                    @assert exam_id != 0 && exams[exam_id] == (i, j)
+
+                    push!(exam_groups[end], exams[exam_id])
+                end
+            end
+        end
+    end
 
     # Declare the splitting model
     model = Model(Gurobi.Optimizer)
-    declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, model)
+    declare_splitting_MILP(
+        I,
+        n_splits,
+        fill_rate,
+        exams,
+        days_split,
+        model,
+        exam_groups = exam_groups,
+    )
     if !isnothing(time_limit_sec)
         set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
     end
@@ -719,6 +756,14 @@ function split_instance(
             for exam in completely_removed_exams
                 I.γ[exam[1], exam[2]] = false
             end
+
+            # Assert that all exams in each exam group are in the same situation
+            for exam_group in exam_groups
+                first_exam = first(exam_group)
+                for exam in exam_group
+                    @assert I.γ[exam[1], exam[2]] == I.γ[first_exam[1], first_exam[2]]
+                end
+            end
         end
 
         # Solve the MILP splitting problem
@@ -742,7 +787,7 @@ function split_instance(
         feasible_splits_found = true
         for (split, SplitI) in enumerate(split_instances)
             RSD_jl_split_warm = Model(Gurobi.Optimizer)
-            declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
+            declare_RSD_jl_split(SplitI, RSD_jl_split_warm; student_groups = student_groups)
             @objective(RSD_jl_split_warm, Min, 0)
             if !isnothing(time_limit_sec)
                 set_optimizer_attribute(RSD_jl_split_warm, "TimeLimit", time_limit_sec)

@@ -824,7 +824,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     @objective(model, Min, objective)
 end
 
-function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
+function declare_RSD_jl_split(SplitI::SplitInstance, model::Model; student_groups = nothing)
     I = SplitI.I
     d_range = SplitI.day_range
     l_range = I.L[d_range[1]][1]:I.L[d_range[end]][end]
@@ -1237,6 +1237,47 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         I.η[I.groups[j].s] == f[j, l]
     )
 
+    # Students grouped together
+    if !isnothing(student_groups)
+        function get_differences(
+            g,
+            stu_group::Vector{Int},
+            j::Int,
+            l::Int,
+            l_range::UnitRange{Int},
+        )
+            s = I.groups[j].s
+            differences = []
+            counter = 0
+            t = 0
+
+            for a = 1:length(stu_group)-1
+                counter += 1
+                curr_term = (l + t in l_range ? g[stu_group[a], j, l+t] : 0)
+                if counter == I.η[s]
+                    t += 1
+                    counter = 0
+                end
+                next_term = (l + t in l_range ? g[stu_group[a+1], j, l+t] : 0)
+                if curr_term != 0 || next_term != 0
+                    push!(differences, next_term - curr_term)
+                end
+            end
+
+            return differences
+        end
+
+        @constraint(
+            model,
+            students_grouped_together[
+                stu_group in student_groups,
+                j in (j for j = 1:I.n_j if is_ij_valid[stu_group[1], j]),
+                l in l_range[1]-div(length(stu_group) - 1, I.η[I.groups[j].s]):l_range[end],
+            ],
+            get_differences(g, stu_group, j, l, l_range) .== 0
+        )
+    end
+
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
@@ -1361,7 +1402,12 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
     end
 end
 
-function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
+function declare_RSD_ijlm(
+    I::Instance,
+    b_values::Array{Bool,3},
+    model::Model;
+    student_groups = nothing,
+)
     #=
     [input] I: instance
     [input] b_values: values of the variable b in a solved RSD_jlm submodel
@@ -1515,6 +1561,58 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
             init = 0,
         ) * [1, -1] .<= [ceil(I.ε[i] / I.n_w) + y[i], -floor(I.ε[i] / I.n_w) + y[i]]
     )
+
+    # Students grouped together
+    if !isnothing(student_groups)
+        function get_differences(
+            x,
+            stu_group::Vector{Int},
+            j::Int,
+            l::Int,
+            m::Int,
+            l_range::UnitRange{Int},
+        )
+            s = I.groups[j].s
+            differences = []
+            counter = 0
+            t = 0
+
+            for a = 1:length(stu_group)-1
+                counter += 1
+                curr_term = (
+                    l + t in l_range && is_ijlm_valid[stu_group[a], j, l+t, m] ?
+                    x[stu_group[a], j, l+t, m] : 0
+                )
+                if counter == I.η[s]
+                    t += 1
+                    counter = 0
+                end
+                next_term = (
+                    l + t in l_range && is_ijlm_valid[stu_group[a+1], j, l+t, m] ?
+                    x[stu_group[a+1], j, l+t, m] : 0
+                )
+                if curr_term != 0 || next_term != 0
+                    push!(differences, next_term - curr_term)
+                end
+            end
+
+            return differences
+        end
+
+        @constraint(
+            model,
+            students_grouped_together[
+                stu_group in student_groups,
+                (
+                    j,
+                    l,
+                    m,
+                ) in ((j, l, m) for
+                      (j, l, m) in valid_jlm if is_ijlm_valid[stu_group[1], j, l, m]),
+            ],
+            get_differences(x, stu_group, j, l, m, 1:I.n_l) .== 0
+        )
+    end
 
 
     # --- Exam related constraints --- #

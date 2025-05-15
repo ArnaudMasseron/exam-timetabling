@@ -4,6 +4,7 @@ using JuMP, Gurobi, JLD2
 # Load source files
 repo_path = String(@__DIR__) * "/../"
 include(repo_path * "src/instance.jl")
+include(repo_path * "src/utils.jl")
 include(repo_path * "src/model.jl")
 include(repo_path * "src/solution.jl")
 
@@ -48,6 +49,10 @@ instance = read_instance(instance_path)
 # Perform basic preliminary infeasibility checks
 check_infeasible_basic(instance)
 
+# Group some students together
+student_groups = find_student_groups(instance)
+#student_groups = nothing
+
 # Split the instance into multiple subinstances
 println_dash("Start solving instance splitting model")
 split_instances, g_values_warmstart, completely_removed_exams = split_instance(
@@ -55,6 +60,7 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     n_splits;
     fill_rate = fill_rate,
     time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec / 10),
+    student_groups = student_groups,
     n_max_tries = 3,
 )
 
@@ -64,7 +70,7 @@ f_values = zeros(Bool, instance.n_j, instance.n_l)
 println_dash("Start solving RSD_jl_split submodels")
 for SplitI in split_instances
     RSD_jl_split = Model(Gurobi.Optimizer)
-    declare_RSD_jl_split(SplitI, RSD_jl_split)
+    declare_RSD_jl_split(SplitI, RSD_jl_split; student_groups = student_groups)
     for ((i, j, l), var) in RSD_jl_split[:g].data
         set_start_value(var, Int(g_values_warmstart[i, j, l]))
     end
@@ -83,7 +89,7 @@ for SplitI in split_instances
     end
 end
 if save_debug
-@save save_dir * "debug/f_values.jld2" f_values
+    @save save_dir * "debug/f_values.jld2" f_values
 end
 
 
@@ -109,7 +115,7 @@ let
     end
 end
 if save_debug
-@save save_dir * "debug/b_values.jld2" b_values
+    @save save_dir * "debug/b_values.jld2" b_values
 end
 
 
@@ -120,7 +126,7 @@ let
 
     println_dash("Start solving RSD_ijlm submodel")
     RSD_ijlm = Model(Gurobi.Optimizer)
-    declare_RSD_ijlm(instance, b_values, RSD_ijlm)
+    declare_RSD_ijlm(instance, b_values, RSD_ijlm; student_groups)
     if !isnothing(time_limit_sec)
         set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec / 10)
     end
@@ -142,7 +148,7 @@ let
     end
 end
 if save_debug
-@save save_dir * "debug/x_values.jld2" x_values
+    @save save_dir * "debug/x_values.jld2" x_values
 end
 
 
@@ -151,24 +157,24 @@ reorder_students_inside_series(instance, x_values)
 
 # Save the solution
 if save_solution
-println_dash("Start saving the solution")
-save_radical =
-    "RSDsplit_" *
-    instance_name *
-    "_" *
-    string(n_splits) *
-    "splits_" *
-    (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
-    "TimeLimit_" *
-    string(fill_rate) *
-    "FillRate"
+    println_dash("Start saving the solution")
+    save_radical =
+        "RSDsplit_" *
+        instance_name *
+        "_" *
+        string(n_splits) *
+        "splits_" *
+        (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
+        "TimeLimit_" *
+        string(fill_rate) *
+        "FillRate"
 
-@save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
+    @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(
         instance,
         x_values,
         completely_removed_exams,
         save_dir * "json/sol_" * save_radical * ".json",
     )
-println_dash("Solution saved")
+    println_dash("Solution saved")
 end
