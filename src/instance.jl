@@ -431,11 +431,7 @@ function declare_splitting_MILP(
                 x[exam, split] * (I.ν[s] + I.μ[s] + I.τ_stu)
             end for exam in exams if i == exam[1];
             init = 0,
-        ) <=
-        fill_rate * (
-            sum(length(I.L[d]) for d in days_split[split]) -
-            sum(!I.θ[i, l] for d in days_split[split] for l in I.L[d])
-        )
+        ) <= fill_rate * sum(I.θ[i, l] for d in days_split[split] for l in I.L[d])
     )
 
     # Student max exams
@@ -515,6 +511,20 @@ function declare_splitting_MILP(
         model,
         examiner_max_days_3[e = 1:I.n_e],
         sum(z[e, split] for split = 1:n_splits) <= I.κ[e]
+    )
+
+    # Rooms enough time
+    @constraint(
+        model,
+        rooms_enough_time[(room_type, dict) in I.room_type_data, split = 1:n_splits],
+        sum(
+            let s = I.groups[exam[2]].s
+                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+            end for exam in exams;
+            init = 0,
+        ) <=
+        fill_rate *
+        sum(I.δ[m, l] for d in days_split[split] for l in I.L[d], m in dict["rooms"])
     )
 
     # Harmonious exam distribution between splits
