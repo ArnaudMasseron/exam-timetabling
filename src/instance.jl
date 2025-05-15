@@ -654,7 +654,7 @@ include(String(@__DIR__) * "/../src/utils.jl")
 function split_instance(
     I::Instance,
     n_splits::Int;
-    fill_rate = 0.85,
+    fill_rate = 0.9,
     time_limit_sec = nothing,
     n_max_tries = 5,
 )
@@ -750,7 +750,8 @@ function split_instance(
             optimize!(RSD_jl_split_warm)
 
             # If the split is infeasible then find the exams that cause problem
-            if termination_status(RSD_jl_split_warm) == MOI.INFEASIBLE_OR_UNBOUNDED
+            if termination_status(RSD_jl_split_warm) in
+               [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED]
                 feasible_splits_found = false
 
                 pb_exams = find_problematic_exams(RSD_jl_split_warm)

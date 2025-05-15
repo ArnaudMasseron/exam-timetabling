@@ -20,7 +20,7 @@ if isempty(ARGS)
     instance_name = "business_school"
     n_splits = 2
     time_limit_sec = 172
-    fill_rate = 0.85
+    fill_rate = 0.9
     save_debug = false
     save_solution = false
 else

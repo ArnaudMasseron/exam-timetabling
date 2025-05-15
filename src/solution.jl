@@ -24,7 +24,7 @@ function write_solution_json(
             examiner_acronyms =
                 map(e -> I.dataset["examiners"][e]["acronym"], I.groups[j].e)
 
-            subject_name = I.dataset["subjects"][s]["acronym"]
+            subject_name = I.dataset["subjects"][s]["name"]
             room_acronym = I.dataset["rooms"][m]["acronym"]
 
             start_datetime = I.timeslots_start_datetime[l]
