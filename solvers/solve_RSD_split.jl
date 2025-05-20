@@ -60,21 +60,52 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
 
 
 # Solve the split instances
+objective_evolution = [
+    Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
+    split = 1:n_splits
+]
 f_values = zeros(Bool, instance.n_j, instance.n_l)
 println_dash("Start solving RSD_jl_split submodels")
-for SplitI in split_instances
+for (split_id, SplitI) in enumerate(split_instances)
+    # Declare model
     RSD_jl_split = Model(Gurobi.Optimizer)
     declare_RSD_jl_split(SplitI, RSD_jl_split)
+
+    # Set warmstart values
     for ((i, j, l), var) in RSD_jl_split[:g].data
         set_start_value(var, Int(g_values_warmstart[i, j, l]))
     end
 
+    # Set time limit
     if !isnothing(time_limit_sec)
         set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_sec * 0.7 / n_splits)
     end
+
+    # Set objective value fetching callback function
+    function objective_value_callback(cb_data::Gurobi.CallbackData, cb_where::Cint)
+        # only act on new integer solutions
+        if cb_where == GRB_CB_MIPSOL
+            # get the objective value
+            obj_ref = Ref{Cdouble}()
+            Gurobi.GRBcbget(cb_data, cb_where, GRB_CB_MIPSOL_OBJ, obj_ref)
+            obj_val = obj_ref[]
+
+            # get the current runtime (in seconds)
+            time_ref = Ref{Cdouble}()
+            Gurobi.GRBcbget(cb_data, cb_where, GRB_CB_RUNTIME, time_ref)
+            run_time = time_ref[]
+
+            push!(objective_evolution[split_id]["time"], run_time)
+            push!(objective_evolution[split_id]["objective"], obj_val)
+        end
+    end
+    MOI.set(RSD_jl_split, Gurobi.CallbackFunction(), objective_value_callback)
+
+    # Solve the model
     optimize!(RSD_jl_split)
     @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
 
+    # Get the values of the variable f
     curr_f_values = value.(RSD_jl_split[:f])
     for j in axes(curr_f_values)[1], l in axes(curr_f_values)[2]
         if curr_f_values[j, l] >= 0.5
@@ -83,7 +114,7 @@ for SplitI in split_instances
     end
 end
 if save_debug
-@save save_dir * "debug/f_values.jld2" f_values
+    @save save_dir * "debug/f_values.jld2" f_values
 end
 
 
@@ -109,7 +140,7 @@ let
     end
 end
 if save_debug
-@save save_dir * "debug/b_values.jld2" b_values
+    @save save_dir * "debug/b_values.jld2" b_values
 end
 
 
@@ -142,7 +173,7 @@ let
     end
 end
 if save_debug
-@save save_dir * "debug/x_values.jld2" x_values
+    @save save_dir * "debug/x_values.jld2" x_values
 end
 
 
@@ -151,24 +182,29 @@ reorder_students_inside_series(instance, x_values)
 
 # Save the solution
 if save_solution
-println_dash("Start saving the solution")
-save_radical =
-    "RSDsplit_" *
-    instance_name *
-    "_" *
-    string(n_splits) *
-    "splits_" *
-    (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
-    "TimeLimit_" *
-    string(fill_rate) *
-    "FillRate"
+    println_dash("Start saving the solution")
+    save_radical =
+        "RSDsplit_" *
+        instance_name *
+        "_" *
+        string(n_splits) *
+        "splits_" *
+        (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
+        "TimeLimit_" *
+        string(fill_rate) *
+        "FillRate"
 
-@save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
+    draw_objective_graphs(
+        save_dir * "graphs/graph_" * save_radical * ".png",
+        objective_evolution,
+        time_limit_sec * 0.7 / n_splits,
+    )
+    @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(
         instance,
         x_values,
         completely_removed_exams,
         save_dir * "json/sol_" * save_radical * ".json",
     )
-println_dash("Solution saved")
+    println_dash("Solution saved")
 end
