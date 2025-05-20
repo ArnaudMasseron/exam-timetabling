@@ -563,10 +563,14 @@ function declare_splitting_MILP(
 
 
     # --- Objective --- #
-    z_coef = 50 / sum(I.κ)
-    p_coef = 30 / length(exams)
+    is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
+    z_coef = 50 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    p_coef = 20 * sum(I.ε)
     q_coef = 20 / length(exams)
-    objective = z_coef * sum(z) + p_coef * sum(p) + q_coef * sum(q)
+    objective =
+        z_coef * sum((is_expert(e) ? 4 : 1) * sum(z[e, :]) for e = 1:I.n_e) +
+        p_coef * sum(p) +
+        q_coef * sum(q)
     @objective(model, Min, objective)
 end
 

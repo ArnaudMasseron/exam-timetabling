@@ -522,18 +522,17 @@ function solution_cost(I::Instance, x::Array{Bool,4})
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    y_coef = 30 / sum(I.ε) # student harmonious exams
-    q_coef = 30 / sum(I.β) # examiner availability
-    w_coef = 30 / sum(I.κ) # examiner max days
-    length_one_exam(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-    z_coef =
-        30 / sum(I.n_l / length_one_exam(I.groups[j].s) * sum(I.γ[:, j]) for j = 1:I.n_j) # exam continuity
-    R_coef = 30 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
+    q_coef = 50 / sum(I.β) # examiner availability
+    is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
+    w_coef = 50 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    z_coef = 50 / sum(I.γ) # exam continuity
+    R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     detailed_objective = [
         y_coef * sum(y),
         q_coef * sum(q),
-        w_coef * sum(w),
+        w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
     ]
