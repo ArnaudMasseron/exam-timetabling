@@ -63,33 +63,40 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
 # Solve the split instances
 obj_evol = [
     Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
-    split = 1:n_splits
+    split = 1:n_splits, objective_id = 1:2
 ]
 f_values = zeros(Bool, instance.n_j, instance.n_l)
-!isnothing(time_limit_sec) && (time_limit_one_split = time_limit_sec * 0.7 / (2 * n_splits))
+!isnothing(time_limit_sec) && (time_limit_one_obj = time_limit_sec * 0.7 / (2 * n_splits))
 
 for (split_id, SplitI) in enumerate(split_instances)
     println_dash("Start solving RSD_jl_split submodel n°$split_id")
     # Declare model
     RSD_jl_split = Model(Gurobi.Optimizer)
-    declare_RSD_jl_split(SplitI, RSD_jl_split)
+    objectives = declare_RSD_jl_split(SplitI, RSD_jl_split)
 
     # Set warmstart values
     for ((i, j, l), var) in RSD_jl_split[:g].data
         set_start_value(var, Int(g_values_warmstart[i, j, l]))
     end
 
-    # Set time limit
-    !isnothing(time_limit_sec) &&
-        set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_one_split)
+    # Solve the model with lexicographic objectives
+    for (obj_id, obj) in enumerate(objectives)
+        if obj_id > 1
+            prev_obj = objectives[obj_id-1]
+            @constraint(RSD_jl_split, prev_obj <= value(prev_obj))
+        end
+        @objective(RSD_jl_split, Min, obj)
+        !isnothing(time_limit_sec) &&
+            set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_one_obj)
 
-    # Set objective value fetching callback function
-    callback_f = get_objective_value_callback(split_id, obj_evol)
-    MOI.set(RSD_jl_split, Gurobi.CallbackFunction(), callback_f)
 
-    # Solve the model
-    optimize!(RSD_jl_split)
-    @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+        # Set callback function
+        callback_f = get_objective_value_callback(split_id, obj_id, obj_evol)
+        MOI.set(RSD_jl_split, Gurobi.CallbackFunction(), callback_f)
+
+        optimize!(RSD_jl_split)
+        @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+    end
 
     # Get the values of the variable f
     curr_f_values = value.(RSD_jl_split[:f])
@@ -182,7 +189,7 @@ if save_solution
     draw_objective_graphs(
         save_dir * "graphs/graph_" * save_radical * ".png",
         obj_evol,
-        time_limit_one_split,
+        time_limit_one_obj,
     )
     @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(

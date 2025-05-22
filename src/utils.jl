@@ -87,7 +87,8 @@ end
 # Set objective value fetching callback function
 function get_objective_value_callback(
     split_id::Int,
-    objective_evolution::Vector{Dict{String,Vector{Float64}}},
+    obj_id::Int,
+    objective_evolution::Matrix{Dict{String,Vector{Float64}}},
 )
     f =
         (cb_data::Gurobi.CallbackData, cb_where::Cint) -> begin
@@ -103,8 +104,8 @@ function get_objective_value_callback(
                 Gurobi.GRBcbget(cb_data, cb_where, GRB_CB_RUNTIME, time_ref)
                 run_time = time_ref[]
 
-                push!(objective_evolution[split_id]["time"], run_time)
-                push!(objective_evolution[split_id]["objective"], obj_val)
+                push!(objective_evolution[split_id, obj_id]["time"], run_time)
+                push!(objective_evolution[split_id, obj_id]["objective"], obj_val)
             end
         end
 

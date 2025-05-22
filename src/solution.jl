@@ -603,12 +603,11 @@ end
 
 function draw_objective_graphs(
     fig_path::String,
-    objective_evolution::Vector{Dict{String,Vector{Float64}}},
+    objective_evolution::Matrix{Dict{String,Vector{Float64}}},
     time_limit::Float64,
 )
     @assert endswith(fig_path, ".png")
-    n_splits = length(objective_evolution)
-
+    n_splits = size(objective_evolution)[1]
     plot(
         [],
         [],
@@ -618,10 +617,16 @@ function draw_objective_graphs(
         ylabel = "Best objective",
     )
 
-    for split = 1:n_splits
-        time = objective_evolution[split]["time"]
-        objective = objective_evolution[split]["objective"]
-        plot!(time, objective, label = "split n°$split", linetype = :steppost)
+    for split = 1:n_splits, obj_id = 1:2
+        time = objective_evolution[split, obj_id]["time"]
+        objective = objective_evolution[split, obj_id]["objective"]
+
+        plot!(
+            time,
+            objective,
+            label = "split n°$split, obj n°$obj_id",
+            linetype = :steppost,
+        )
     end
 
     plot!(legend = :topright)

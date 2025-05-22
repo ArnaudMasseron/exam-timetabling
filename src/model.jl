@@ -443,13 +443,13 @@ function declare_CM(I::Instance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m) / I.η[I.groups[j].s] <=
-                I.ρ[I.groups[j].s] -
-                sum(
+        I.ρ[I.groups[j].s] -
+        sum(
             x[i, j, l-a*I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m,
-                    a = 1:I.ρ[I.groups[j].s];
-                    init = 0,
-                ) / I.η[I.groups[j].s]
-            )
+            a = 1:I.ρ[I.groups[j].s];
+            init = 0,
+        ) / I.η[I.groups[j].s]
+    )
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
@@ -717,9 +717,9 @@ function declare_RSD_jl(I::Instance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         f[j, l] <=
-                I.ρ[I.groups[j].s] -
+        I.ρ[I.groups[j].s] -
         sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
-            )
+    )
 
 
     # --- Room related constraints --- #
@@ -1150,9 +1150,9 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         f[j, l] <=
-                I.ρ[I.groups[j].s] -
-                sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
-            )
+        I.ρ[I.groups[j].s] -
+        sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
+    )
 
 
     # --- Room related constraints --- #
@@ -1304,7 +1304,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     )
 
 
-    # --- Objective function --- #
+    # --- Objective --- #
     # Soft constraints penalty coefficients
     q_coef = 80 / sum(I.β[e, l] for e in valid_e, l in l_range) # examiner availability
     is_expert(e) = (SplitI.I.dataset["examiners"][e]["type"] == "expert")
@@ -1313,13 +1313,14 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     R_coef = 10 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam early
     Rr_coef = 50 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
 
-    objective =
+    obj1 =
         q_coef * sum(q) +
         w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e in valid_e) +
         z_coef * sum(z) +
-        R_coef * sum(R[e, d] - I.L[d][1] for e in valid_e, d in d_range) +
         Rr_coef * sum(R[e, d] - r[e, d] for e in valid_e, d in d_range)
-    @objective(model, Min, objective)
+    obj2 = Rr_coef * sum(R[e, d] - r[e, d] for e in valid_e, d in d_range)
+
+    return [obj1, obj2]
 end
 
 function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
