@@ -705,9 +705,8 @@ function split_instance(
     # Declare the splitting model
     model = Model(Gurobi.Optimizer)
     declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, model)
-    if !isnothing(time_limit_sec)
+    !isnothing(time_limit_sec) &&
         set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
-    end
 
     # Solve the splitting problem until a feasible split has been found
     feasible_splits_found = false
@@ -758,9 +757,8 @@ function split_instance(
             RSD_jl_split_warm = Model(Gurobi.Optimizer)
             declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
             @objective(RSD_jl_split_warm, Min, 0)
-            if !isnothing(time_limit_sec)
+            !isnothing(time_limit_sec) &&
                 set_optimizer_attribute(RSD_jl_split_warm, "TimeLimit", time_limit_sec)
-            end
             optimize!(RSD_jl_split_warm)
 
             # If the split is infeasible then find the exams that cause problem

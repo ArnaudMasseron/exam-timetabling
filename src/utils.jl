@@ -83,3 +83,30 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
         end
     end
 end
+
+# Set objective value fetching callback function
+function get_objective_value_callback(
+    split_id::Int,
+    objective_evolution::Vector{Dict{String,Vector{Float64}}},
+)
+    f =
+        (cb_data::Gurobi.CallbackData, cb_where::Cint) -> begin
+            # only act on new integer solutions
+            if cb_where == GRB_CB_MIPSOL
+                # get the objective value
+                obj_ref = Ref{Cdouble}()
+                Gurobi.GRBcbget(cb_data, cb_where, GRB_CB_MIPSOL_OBJ, obj_ref)
+                obj_val = obj_ref[]
+
+                # get the current runtime (in seconds)
+                time_ref = Ref{Cdouble}()
+                Gurobi.GRBcbget(cb_data, cb_where, GRB_CB_RUNTIME, time_ref)
+                run_time = time_ref[]
+
+                push!(objective_evolution[split_id]["time"], run_time)
+                push!(objective_evolution[split_id]["objective"], obj_val)
+            end
+        end
+
+    return f
+end
