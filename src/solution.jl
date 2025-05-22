@@ -604,33 +604,24 @@ end
 function draw_objective_graphs(
     fig_path::String,
     objective_evolution::Vector{Dict{String,Vector{Float64}}},
-    time_limit_sec::Float64,
+    time_limit::Float64,
 )
     @assert endswith(fig_path, ".png")
     n_splits = length(objective_evolution)
-    time = objective_evolution[1]["time"]
-    objective = objective_evolution[1]["objective"]
 
-    x = (isnothing(time_limit_sec) ? time : vcat(time, [time_limit_sec]))
-    y = vcat(objective, [objective[end]])
     plot(
-        x,
-        y,
-        xlims = (0, time_limit_sec),
-        label = "Split n°1",
+        [],
+        [],
+        xlims = (0, time_limit),
         title = "Best RSD_jl objective vs Time",
         xlabel = "Time (seconds)",
         ylabel = "Best objective",
-        linetype = :steppost,
     )
 
-    for split = 2:n_splits
+    for split = 1:n_splits
         time = objective_evolution[split]["time"]
         objective = objective_evolution[split]["objective"]
-
-        x = (isnothing(time_limit_sec) ? time : vcat(time, [time_limit_sec]))
-        y = vcat(objective, [objective[end]])
-        plot!(x, y, label = "Split n°$split")
+        plot!(time, objective, label = "split n°$split", linetype = :steppost)
     end
 
     plot!(legend = :topright)
