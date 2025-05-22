@@ -449,8 +449,11 @@ function solution_cost(I::Instance, x::Array{Bool,4})
     for j = 1:I.n_j, l = 1:I.n_l
         LHS = sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0)
         if LHS > 0
-            for e in I.groups[j].e
-                q[e, l] = true
+            s = I.groups[j].s
+            for e in I.groups[j].e, t = I.μ[s]:I.ν[s]-1
+                if !I.β[e, l+t]
+                    q[e, l+t] = true
+                end
             end
         end
     end
@@ -481,20 +484,23 @@ function solution_cost(I::Instance, x::Array{Bool,4})
             end
         end
 
-        w = nb_days - 1
+        w[e] = nb_days - 1
     end
 
     # Exam grouped
-    R = zeros(Int, I.n_e, I.n_d)
+    R = [I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d]
+    r = [I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d]
     for j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]
-        expr =
-            l +
-            (I.L[d][1] - l) * (
-                1 -
-                sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
-                I.η[I.groups[j].s]
-            )
-        R[e, d] = max(R[e, d], expr)
+        exam_going_on = isapprox(
+            sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
+            I.η[I.groups[j].s],
+            1,
+            rtol = 0.01,
+        )
+        if exam_going_on
+            R[e, d] = max(R[e, d], l)
+            r[e, d] = min(r[e, d], l)
+        end
     end
 
     # Exam continuity
@@ -506,7 +512,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
             t in I.ν[s] * (1:I.ρ[s]) if l - t >= I.L[d][1];
             init = 0,
         )
-        constraint_active = l >= I.L[d][1+I.ρ[s]*I.ν[s]] || nb_exams_before < I.ρ[s]
+        constraint_active = (nb_exams_before < I.ρ[s])
 
         if constraint_active
             LHS = sum(x[i, j, l-I.ν[s], m] for i = 1:I.n_i if I.γ[i, j]; init = 0)
@@ -516,18 +522,18 @@ function solution_cost(I::Instance, x::Array{Bool,4})
                 z[j, l, m] = true
             end
         end
-
     end
 
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
-    q_coef = 50 / sum(I.β) # examiner availability
+    q_coef = 80 / sum(I.β) # examiner availability
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 50 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    w_coef = 60 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
     R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     detailed_objective = [
         y_coef * sum(y),
@@ -535,10 +541,64 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
+        Rr_coef * sum(R[e, d] - r[e, d] for e = 1:I.n_e, d = 1:I.n_d),
     ]
     objective = sum(detailed_objective)
 
-    return objective, detailed_objective
+    # --- Sot constraint interbretable details --- #
+    detailed_soft_constraints = Dict{String,Any}()
+
+    detailed_soft_constraints["nb_non_harmonious_students"] = sum(y .> 0)
+
+    classes_canceled_min = sum(q) * I.Δ_l.value
+    detailed_soft_constraints["nb_hours_cancelled"] =
+        Time(div(classes_canceled_min, 60), ceil(classes_canceled_min % 60))
+
+    theoretical_min_days_needed = zeros(Int, I.n_e)
+    for e = 1:I.n_e
+        if !is_expert(e)
+            continue
+        end
+        nb_exams_e = sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j])
+        min_days_1 = Int(ceil(nb_exams_e, I.ζ[e]))
+
+        total_time_needed_e = 0
+        for j = 1:I.n_j
+            if I.λ[e, j]
+                s = I.groups[j].s
+                total_time_needed_e +=
+                    (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s] * sum(I.γ[:, j])
+            end
+        end
+        min_days_2 = Int(ceil(total_time_needed_e, I.n_l / I.n_d - I.τ_lun))
+
+        theoretical_min_days_needed = max(min_days_1, min_days_2)
+    end
+    detailed_soft_constraints["expert_mean_additional_days"] =
+        sum(w[e] + 1 - theoretical_min_days_needed[e] for e = 1:I.n_e if is_expert(e)) /
+        sum(is_expert.(1:I.n_e))
+
+    detailed_soft_constraints["nb_unwanted_exam_discontinuities"] = sum(z)
+
+    length_last_exam = zeros(Int, I.n_e, I.n_d)
+    for e = 1:I.n_e, d = 1:I.n_d
+        l = R[e, d]
+        s = nothing
+        for j = 1:I.n_j
+            if I.λ[e, j] && sum(x[:, j, l, :]) > 0
+                s = I.groups[j].s
+                break
+            end
+        end
+        length_last_exam[e, d] = (isnothing(s) ? 0 : I.ν[s])
+    end
+    mean_day_length_min =
+        sum(R[e, d] - r[e, d] + length_last_exam[e, d] for e = 1:I.n_e, d = 1:I.n_d) /
+        sum(1 for e = 1:I.n_e, d = 1:I.n_d if length_last_exam[e, d] > 0) * I.Δ_l.value
+    detailed_soft_constraints["mean_examiner_day_length"] =
+        Time(div(mean_day_length_min, 60), ceil(mean_day_length_min % 60))
+
+    return objective, detailed_objective, detailed_soft_constraints
 end
 
 function draw_objective_graphs(
@@ -557,7 +617,7 @@ function draw_objective_graphs(
         x,
         y,
         xlims = (0, time_limit_sec),
-        label = "Split 1",
+        label = "Split n°1",
         title = "Best RSD_jl objective vs Time",
         xlabel = "Time (seconds)",
         ylabel = "Best objective",
@@ -570,7 +630,7 @@ function draw_objective_graphs(
 
         x = (isnothing(time_limit_sec) ? time : vcat(time, [time_limit_sec]))
         y = vcat(objective, [objective[end]])
-        plot!(x, y, label = "Split $split")
+        plot!(x, y, label = "Split n°$split")
     end
 
     plot!(legend = :topright)

@@ -520,7 +520,7 @@ function declare_splitting_MILP(
         sum(
             let s = I.groups[exam[2]].s
                 x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam in exams;
+            end for exam in exams if I.groups[exam[2]].s in dict["subjects"];
             init = 0,
         ) <=
         fill_rate *
@@ -739,7 +739,7 @@ function split_instance(
         optimize!(model)
 
         # If the model is infeasible the print the problematic constraints
-        if termination_status(model) == MOI.INFEASIBLE_OR_UNBOUNDED
+        if termination_status(model) in [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED]
             print_constraint_conflicts(model)
             error("Unable to split the instance. 
                   This can be the result of a time limit that is too small. 
