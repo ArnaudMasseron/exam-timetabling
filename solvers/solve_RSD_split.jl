@@ -101,6 +101,7 @@ for (split_id, SplitI) in enumerate(split_instances)
 end
 if save_debug
     @save save_dir * "debug/f_values.jld2" f_values
+    @save save_dir * "debug/obj_evol.jld2" obj_evol
 end
 
 
