@@ -108,6 +108,7 @@ for (split_id, SplitI) in enumerate(split_instances)
 end
 if save_debug
     @save save_dir * "debug/f_values.jld2" f_values
+    @save save_dir * "debug/obj_evol.jld2" obj_evol
 end
 
 
@@ -176,7 +177,7 @@ reorder_students_inside_series(instance, x_values)
 if save_solution
     println_dash("Start saving the solution")
     save_radical =
-        "RSDsplit_" *
+        "multi_obj_RSDsplit_" *
         instance_name *
         "_" *
         string(n_splits) *

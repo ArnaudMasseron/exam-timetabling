@@ -559,8 +559,9 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         if !is_expert(e)
             continue
         end
-        nb_exams_e = sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j])
-        min_days_1 = Int(ceil(nb_exams_e, I.ζ[e]))
+        nb_exams_e =
+            sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i)
+        min_days_1 = Int(ceil(nb_exams_e / I.ζ[e]))
 
         total_time_needed_e = 0
         for j = 1:I.n_j
@@ -570,9 +571,9 @@ function solution_cost(I::Instance, x::Array{Bool,4})
                     (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s] * sum(I.γ[:, j])
             end
         end
-        min_days_2 = Int(ceil(total_time_needed_e, I.n_l / I.n_d - I.τ_lun))
+        min_days_2 = Int(ceil(total_time_needed_e / (I.n_l / I.n_d - I.τ_lun)))
 
-        theoretical_min_days_needed = max(min_days_1, min_days_2)
+        theoretical_min_days_needed[e] = max(min_days_1, min_days_2)
     end
     detailed_soft_constraints["expert_mean_additional_days"] =
         sum(w[e] + 1 - theoretical_min_days_needed[e] for e = 1:I.n_e if is_expert(e)) /
