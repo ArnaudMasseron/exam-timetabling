@@ -447,10 +447,10 @@ function solution_cost(I::Instance, x::Array{Bool,4})
     # Group availability
     q = zeros(Bool, I.n_e, I.n_l)
     for j = 1:I.n_j, l = 1:I.n_l
-        LHS = sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0)
+        LHS = sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m; init = 0)
         if LHS > 0
             s = I.groups[j].s
-            for e in I.groups[j].e, t = I.μ[s]:I.ν[s]-1
+            for e in I.groups[j].e, t = -I.μ[s]:I.ν[s]-1
                 if !I.β[e, l+t]
                     q[e, l+t] = true
                 end
@@ -460,7 +460,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
 
     # Group one block cancelation
     for e = 1:I.n_e, P in I.U[e]
-        one_q_true = prod(q[e, P[a]] for a = 1:lastindex(P)-1; init = true)
+        one_q_true = sum(q[e, P[a]] for a = 1:lastindex(P)-1; init = 0) > 0
         if one_q_true
             for a = 1:lastindex(P)-1
                 q[e, P[a]] = true
@@ -489,8 +489,8 @@ function solution_cost(I::Instance, x::Array{Bool,4})
 
     # Exam grouped
     R = [I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d]
-    r = [I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d]
-    for j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]
+    r = [I.L[d][end] for e = 1:I.n_e, d = 1:I.n_d]
+    for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]
         exam_going_on = isapprox(
             sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
             I.η[I.groups[j].s],
@@ -498,8 +498,15 @@ function solution_cost(I::Instance, x::Array{Bool,4})
             rtol = 0.01,
         )
         if exam_going_on
-            R[e, d] = max(R[e, d], l)
-            r[e, d] = min(r[e, d], l)
+            for e in I.groups[j].e
+                R[e, d] = max(R[e, d], l)
+                r[e, d] = min(r[e, d], l)
+            end
+        end
+    end
+    for e = 1:I.n_e, d = 1:I.n_d
+        if r[e, d] > R[e, d]
+            r[e, d] = R[e, d]
         end
     end
 
@@ -528,7 +535,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
     # --- Objective function --- #
     # Soft constraints penalty coefficients
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
-    q_coef = 80 / sum(I.β) # examiner availability
+    q_coef = 80 / sum(.!I.β) # examiner availability
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
     w_coef = 60 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
@@ -541,7 +548,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
-        Rr_coef * sum(R[e, d] - r[e, d] for e = 1:I.n_e, d = 1:I.n_d),
+        Rr_coef * sum(R .- r),
     ]
     objective = sum(detailed_objective)
 
@@ -559,6 +566,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         if !is_expert(e)
             continue
         end
+
         nb_exams_e =
             sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i)
         min_days_1 = Int(ceil(nb_exams_e / I.ζ[e]))
@@ -579,25 +587,90 @@ function solution_cost(I::Instance, x::Array{Bool,4})
         sum(w[e] + 1 - theoretical_min_days_needed[e] for e = 1:I.n_e if is_expert(e)) /
         sum(is_expert.(1:I.n_e))
 
-    detailed_soft_constraints["nb_unwanted_exam_discontinuities"] = sum(z)
+    detailed_soft_constraints["nb_penalized_exam_discontinuities"] = sum(z)
 
-    length_last_exam = zeros(Int, I.n_e, I.n_d)
+    has_exam = zeros(Bool, I.n_e, I.n_d)
+    unwanted_breaks = zeros(Int, I.n_e, I.n_d)
     for e = 1:I.n_e, d = 1:I.n_d
-        l = R[e, d]
-        s = nothing
-        for j = 1:I.n_j
-            if I.λ[e, j] && sum(x[:, j, l, :]) > 0
+        if sum(
+            I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, l in I.L[d], m = 1:I.n_m
+        ) == 0
+            continue
+        end
+        has_exam[e, d] = true
+
+        prev_exam_l = nothing
+        prev_m = nothing
+        prev_j = nothing
+        prev_s = nothing
+        lunch_pause_added = false
+        for l = r[e, d]:R[e, d]
+            if sum(I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, m = 1:I.n_m) > 0
+                j = nothing
+                m = nothing
+                for j_tilde = 1:I.n_j
+                    if I.λ[e, j_tilde]
+                        for m_tilde = 1:I.n_m
+                            if sum(x[i, j_tilde, l, m_tilde] for i = 1:I.n_i) > 0
+                                j = j_tilde
+                                m = m_tilde
+                                break
+                            end
+                        end
+                    end
+                end
                 s = I.groups[j].s
-                break
+
+                if !isnothing(prev_exam_l)
+                    total_empty_time = l - prev_exam_l - 1
+
+                    discontinuity_in_between = (total_empty_time > I.ν[prev_s] - 1)
+                    class_time_in_between = sum(
+                        I.α[e, l_tilde] * !I.β[e, l_tilde] * (1 - q[e, l_tilde]) for
+                        l_tilde = prev_exam_l+I.ν[prev_s]-1:l-I.μ[prev_s];
+                        init = 0,
+                    )
+                    wanted_empty_time = I.ν[prev_s] - 1
+                    wanted_empty_time += max(
+                        discontinuity_in_between * max(I.τ_seq, I.μ[s]),
+                        (prev_m != m) * I.τ_room,
+                        (prev_j != j) * I.τ_swi,
+                        class_time_in_between,
+                    )
+
+                    if !lunch_pause_added
+                        prev_exam_end = prev_exam_l + I.ν[prev_s] - 1
+                        end_in_lunch_window =
+                            (I.V[d][1] <= prev_exam_end && prev_exam_end <= I.V[d][end])
+                        lunch_wasted_time =
+                            total_empty_time - (I.ν[prev_s] - 1 + I.τ_lun + I.μ[s])
+                        enough_time_for_lunch =
+                            lunch_wasted_time >= 0 &&
+                            wanted_empty_time <= total_empty_time - lunch_wasted_time
+                        if end_in_lunch_window && enough_time_for_lunch
+                            @assert discontinuity_in_between
+                            lunch_pause_added = true
+                            wanted_empty_time = I.ν[prev_s] - 1 + I.τ_lun + I.μ[s]
+                        end
+                    end
+
+                    unwanted_empty_time = total_empty_time - wanted_empty_time
+                    @assert unwanted_empty_time >= 0
+                    if unwanted_empty_time > 0
+                        unwanted_breaks[e, d] += unwanted_empty_time
+                    end
+                end
+
+                prev_exam_l = l
+                prev_m = m
+                prev_j = j
+                prev_s = s
             end
         end
-        length_last_exam[e, d] = (isnothing(s) ? 0 : I.ν[s])
     end
-    mean_day_length_min =
-        sum(R[e, d] - r[e, d] + length_last_exam[e, d] for e = 1:I.n_e, d = 1:I.n_d) /
-        sum(1 for e = 1:I.n_e, d = 1:I.n_d if length_last_exam[e, d] > 0) * I.Δ_l.value
-    detailed_soft_constraints["mean_examiner_day_length"] =
-        Time(div(mean_day_length_min, 60), ceil(mean_day_length_min % 60))
+    mean_unwanted_breaks_min = sum(unwanted_breaks) / sum(has_exam) * Int(I.Δ_l / Minute(1))
+    detailed_soft_constraints["mean_examiner_unwanted_breaks"] =
+        Time(div(mean_unwanted_breaks_min, 60), ceil(mean_unwanted_breaks_min % 60))
 
     return objective, detailed_objective, detailed_soft_constraints
 end
