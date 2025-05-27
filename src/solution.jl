@@ -571,6 +571,13 @@ function solution_cost(I::Instance, x::Array{Bool,4})
             sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i)
         min_days_1 = Int(ceil(nb_exams_e / I.ζ[e]))
 
+        day_timeslot_threhsolds =
+            [length(I.L[d]) - I.τ_lun - sum(!I.α[e, l] for l in I.L[d]) for d = 1:I.n_d]
+        sort!(day_timeslot_threhsolds)
+        for d = 2:I.n_d
+            day_timeslot_threhsolds[d] += day_timeslot_threhsolds[d-1]
+        end
+
         total_time_needed_e = 0
         for j = 1:I.n_j
             if I.λ[e, j]
@@ -579,7 +586,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
                     (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s] * sum(I.γ[:, j])
             end
         end
-        min_days_2 = Int(ceil(total_time_needed_e / (I.n_l / I.n_d - I.τ_lun)))
+        min_days_2 = searchsortedfirst(day_timeslot_threhsolds, total_time_needed_e)
 
         theoretical_min_days_needed[e] = max(min_days_1, min_days_2)
     end
