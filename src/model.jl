@@ -108,11 +108,11 @@ function declare_CM(I::Instance, model::Model)
             model,
             group_availability[(j, l) in sum_ids],
             length(I.groups[j].e) *
-            length(I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1) *
+            length(-I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1) *
             sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) <=
             I.η[I.groups[j].s] * sum(
                 I.β[e, l+t] ? 1 : q[e, l+t] for e in I.groups[j].e,
-                t = I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
+                t = -I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
             )
         )
     end
@@ -150,24 +150,27 @@ function declare_CM(I::Instance, model::Model)
     # Examiner lunch break 1
     @variable(model, b[e = 1:I.n_e, l in vcat(I.V...)], binary = true)
     let
-        M(s) = ceil((I.μ[s] + I.ν[s] + I.τ_lun - 1) / I.ν[s])
+        μ_max_e = [maximum(I.μ[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        ν_max_e = [maximum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        ν_min_e = [minimum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        M(e) = ceil((μ_max_e[e] + ν_max_e[e] + I.τ_lun - 1) / ν_min_e[e]) + I.τ_lun
 
         @constraint(
             model,
-            examiner_lunch_break_1[
-                j in 1:I.n_j,
-                e in I.groups[j].e,
-                d = 1:I.n_d,
-                l in I.V[d],
-            ],
+            examiner_lunch_break_1[e = 1:I.n_e, d = 1:I.n_d, l in I.V[d]],
             sum(
-                x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t =
+                x[i, j, l+t, m] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for
+                i = 1:I.n_i if I.γ[i, j] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     ), m = 1:I.n_m;
                 init = 0,
-            ) / I.η[I.groups[j].s] <= M(I.groups[j].s) * (1 - b[e, l])
+            ) + sum(
+                I.α[e, l+t] * !I.β[e, l+t] * (1 - q[e, l+t]) for
+                t = 0:min(I.L[d][end] - l, I.τ_lun - 1);
+                init = 0,
+            ) <= M(e) * (1 - b[e, l])
         )
     end
 
@@ -443,20 +446,20 @@ function declare_CM(I::Instance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m) / I.η[I.groups[j].s] <=
-                I.ρ[I.groups[j].s] -
-                sum(
+        I.ρ[I.groups[j].s] -
+        sum(
             x[i, j, l-a*I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m,
-                    a = 1:I.ρ[I.groups[j].s];
-                    init = 0,
-                ) / I.η[I.groups[j].s]
-            )
+            a = 1:I.ρ[I.groups[j].s];
+            init = 0,
+        ) / I.η[I.groups[j].s]
+    )
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
-    q_coef = 80 / sum(I.β) # examiner availability
+    q_coef = 80 / sum(.!I.β) # examiner availability
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
     R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam early
     Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
@@ -464,7 +467,7 @@ function declare_CM(I::Instance, model::Model)
     objective =
         y_coef * sum(y) +
         q_coef * sum(q) +
-        w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e) +
+        w_coef * sum(is_expert(e) * w[e] for e = 1:I.n_e) +
         z_coef * sum(z) +
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d) +
         Rr_coef * sum(R[e, d] - r[e, d] for e = 1:I.n_e, d = 1:I.n_d)
@@ -482,7 +485,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Group availability
     @variable(model, 0 <= q[e = 1:I.n_e, l = 1:I.n_l] <= 1)
     let
-        M(j, s) = length(I.groups[j].e) * length(I.μ[s]:I.ν[s]-1)
+        M(j, s) = length(I.groups[j].e) * length(-I.μ[s]:I.ν[s]-1)
 
         sum_ids = Set{Tuple{Int,Int}}()
         for s = 1:I.n_s,
@@ -504,7 +507,7 @@ function declare_RSD_jl(I::Instance, model::Model)
             group_availability[(j, l) in sum_ids],
             M(j, I.groups[j].s) * f[j, l] <= sum(
                 I.β[e, l+t] ? 1 : q[e, l+t] for e in I.groups[j].e,
-                t = I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
+                t = -I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
             )
         )
     end
@@ -537,24 +540,26 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Examiner lunch break 1
     @variable(model, b[e = 1:I.n_e, l in vcat(I.V...)], binary = true)
     let
-        M = [ceil((I.μ[s] + I.τ_lun - 1 - (-I.ν[s] + 1) + 1) / I.ν[s]) for s = 1:I.n_s]
+        μ_max_e = [maximum(I.μ[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        ν_max_e = [maximum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        ν_min_e = [minimum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
+        M(e) = ceil((μ_max_e[e] + ν_max_e[e] + I.τ_lun - 1) / ν_min_e[e]) + I.τ_lun
 
         @constraint(
             model,
-            examiner_lunch_break_1[
-                j in 1:I.n_j,
-                e in I.groups[j].e,
-                d = 1:I.n_d,
-                l in I.V[d],
-            ],
+            examiner_lunch_break_1[e = 1:I.n_e, d = 1:I.n_d, l in I.V[d]],
             sum(
-                f[j, l+t] for t =
+                f[j, l+t] for j = 1:I.n_e if I.λ[e, j] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     );
                 init = 0,
-            ) <= M[I.groups[j].s] * (1 - b[e, l])
+            ) + sum(
+                I.α[e, l+t] * !I.β[e, l+t] * (1 - q[e, l+t]) for
+                t = 0:min(I.L[d][end] - l, I.τ_lun - 1);
+                init = 0,
+            ) <= M(e) * (1 - b[e, l])
         )
     end
 
@@ -717,9 +722,9 @@ function declare_RSD_jl(I::Instance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         f[j, l] <=
-                I.ρ[I.groups[j].s] -
+        I.ρ[I.groups[j].s] -
         sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
-            )
+    )
 
 
     # --- Room related constraints --- #
@@ -860,16 +865,16 @@ function declare_RSD_jl(I::Instance, model::Model)
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    q_coef = 80 / sum(I.β) # examiner availability
+    q_coef = 80 / sum(.!I.β) # examiner availability
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
     R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam early
     Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
 
     objective =
         q_coef * sum(q) +
-        w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e) +
+        w_coef * sum(is_expert(e) * w[e] for e = 1:I.n_e) +
         z_coef * sum(z) +
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d) +
         Rr_coef * sum(R[e, d] - r[e, d] for e = 1:I.n_e, d = 1:I.n_d)
@@ -908,7 +913,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Group availability
     @variable(model, 0 <= q[e in valid_e, l = l_range] <= 1)
     let
-        M(j, s) = length(I.groups[j].e) * length(I.μ[s]:I.ν[s]-1)
+        M(j, s) = length(I.groups[j].e) * length(-I.μ[s]:I.ν[s]-1)
 
         sum_ids = Set{Tuple{Int,Int}}()
         for s = 1:I.n_s,
@@ -930,7 +935,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             group_availability[(j, l) in sum_ids],
             M(j, I.groups[j].s) * f[j, l] <= sum(
                 I.β[e, l+t] ? 1 : q[e, l+t] for e in I.groups[j].e,
-                t = I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
+                t = -I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
             )
         )
     end
@@ -970,24 +975,32 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Examiner lunch break 1
     @variable(model, b[e in valid_e, l in vcat(I.V[d_range]...)], binary = true)
     let
-        M = [ceil((I.μ[s] + I.τ_lun - 1 - (-I.ν[s] + 1) + 1) / I.ν[s]) for s = 1:I.n_s]
+        μ_max_e = [
+            (e in valid_e ? maximum(I.μ[I.groups[j].s] for j in valid_j if I.λ[e, j]) : -1) for e = 1:I.n_e
+        ]
+        ν_max_e = [
+            (e in valid_e ? maximum(I.ν[I.groups[j].s] for j in valid_j if I.λ[e, j]) : -1) for e = 1:I.n_e
+        ]
+        ν_min_e = [
+            (e in valid_e ? minimum(I.ν[I.groups[j].s] for j in valid_j if I.λ[e, j]) : -1) for e = 1:I.n_e
+        ]
+        M(e) = ceil((μ_max_e[e] + ν_max_e[e] + I.τ_lun - 1) / ν_min_e[e]) + I.τ_lun
 
         @constraint(
             model,
-            examiner_lunch_break_1[
-                j in valid_j,
-                e in I.groups[j].e,
-                d = d_range,
-                l in I.V[d],
-            ],
+            examiner_lunch_break_1[e in valid_e, d = d_range, l in I.V[d]],
             sum(
-                f[j, l+t] for t =
+                f[j, l+t] for j in valid_j if I.λ[e, j] for t =
                     max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                         I.L[d][end] - l,
                         I.μ[I.groups[j].s] + I.τ_lun - 1,
                     );
                 init = 0,
-            ) <= M[I.groups[j].s] * (1 - b[e, l])
+            ) + sum(
+                I.α[e, l+t] * !I.β[e, l+t] * (1 - q[e, l+t]) for
+                t = 0:min(I.L[d][end] - l, I.τ_lun - 1);
+                init = 0,
+            ) <= M(e) * (1 - b[e, l])
         )
     end
 
@@ -1150,9 +1163,9 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
         ],
         f[j, l] <=
-                I.ρ[I.groups[j].s] -
-                sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
-            )
+        I.ρ[I.groups[j].s] -
+        sum(f[j, l-a*I.ν[I.groups[j].s]] for a = 1:I.ρ[I.groups[j].s]; init = 0)
+    )
 
 
     # --- Room related constraints --- #
@@ -1306,16 +1319,16 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    q_coef = 80 / sum(I.β[e, l] for e in valid_e, l in l_range) # examiner availability
+    q_coef = 80 / sum(!I.β[e, l] for e in valid_e, l in l_range) # examiner availability
     is_expert(e) = (SplitI.I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum((is_expert(e) ? 4 : 1) * SplitI.κ[e] for e in valid_e) # examiner max days
+    w_coef = 60 / sum(is_expert(e) * SplitI.κ[e] for e in valid_e) # examiner max days
     z_coef = 50 / length(valid_ij) # exam continuity
     R_coef = 10 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam early
     Rr_coef = 50 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
 
     objective =
         q_coef * sum(q) +
-        w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e in valid_e) +
+        w_coef * sum(is_expert(e) * w[e] for e in valid_e) +
         z_coef * sum(z) +
         R_coef * sum(R[e, d] - I.L[d][1] for e in valid_e, d in d_range) +
         Rr_coef * sum(R[e, d] - r[e, d] for e in valid_e, d in d_range)
