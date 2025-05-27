@@ -165,13 +165,11 @@ function read_instance(path::String)
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
 
-            curr_datetime = start_datetime
-            while (curr_datetime < end_datetime)
-                l = searchsortedlast(timeslots_start_datetime, curr_datetime)
-                if l != 0
-                    θ[i, l] = false
-                end
-                curr_datetime += Δ_l
+            start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+
+            for l = start_timeslot:end_timeslot
+                θ[i, l] = false
             end
         end
     end
@@ -189,33 +187,26 @@ function read_instance(path::String)
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
 
-            curr_datetime = start_datetime
-            while (curr_datetime < end_datetime)
-                l = searchsortedlast(timeslots_start_datetime, curr_datetime)
-                if l != 0
-                    α[e, l] = false
-                end
-                curr_datetime += Δ_l
+            start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+
+            for l = start_timeslot:end_timeslot
+                α[e, l] = false
             end
         end
 
         for (start_datetime_str, end_datetime_str) in dict["soft_unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
-            new_entry_added = false
 
-            curr_datetime = start_datetime
-            while (curr_datetime < end_datetime)
-                l = searchsortedlast(timeslots_start_datetime, curr_datetime)
-                if l != 0 && curr_datetime - timeslots_start_datetime[l] < Δ_l
-                    if !new_entry_added
-                        push!(U[e], [])
-                        new_entry_added = true
-                    end
-                    β[e, l] = false
-                    push!(U[e][end], l)
-                end
-                curr_datetime += Δ_l
+            start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+
+            (start_timeslot <= end_timeslot) && push!(U[e], Vector{Int}())
+
+            for l = start_timeslot:end_timeslot
+                β[e, l] = false
+                push!(U[e][end], l)
             end
         end
     end
@@ -281,13 +272,11 @@ function read_instance(path::String)
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
 
-            curr_datetime = start_datetime
-            while (curr_datetime < end_datetime)
-                l = searchsortedlast(timeslots_start_datetime, curr_datetime)
-                if l != 0
-                    δ[m, l] = false
-                end
-                curr_datetime += Δ_l
+            start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+
+            for l = start_timeslot:end_timeslot
+                δ[m, l] = false
             end
         end
     end
