@@ -431,7 +431,7 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
     return true
 end
 
-function solution_cost(I::Instance, x::Array{Bool,4})
+function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = false)
     # Student harmonious exams
     y = zeros(Int, I.n_i)
     for i = 1:I.n_i, w = 1:I.n_w
@@ -559,7 +559,7 @@ function solution_cost(I::Instance, x::Array{Bool,4})
 
     classes_canceled_min = sum(q) * I.Δ_l.value
     detailed_soft_constraints["nb_hours_cancelled"] =
-        Time(div(classes_canceled_min, 60), ceil(classes_canceled_min % 60))
+        Hour(div(classes_canceled_min, 60)) + Minute(ceil(classes_canceled_min % 60))
 
     theoretical_min_days_needed = zeros(Int, I.n_e)
     for e = 1:I.n_e
@@ -596,88 +596,94 @@ function solution_cost(I::Instance, x::Array{Bool,4})
 
     detailed_soft_constraints["nb_penalized_exam_discontinuities"] = sum(z)
 
-    has_exam = zeros(Bool, I.n_e, I.n_d)
-    unwanted_breaks = zeros(Int, I.n_e, I.n_d)
-    for e = 1:I.n_e, d = 1:I.n_d
-        if sum(
-            I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, l in I.L[d], m = 1:I.n_m
-        ) == 0
-            continue
-        end
-        has_exam[e, d] = true
+    if compute_unwanted_breaks
+        has_exam = zeros(Bool, I.n_e, I.n_d)
+        unwanted_breaks = zeros(Int, I.n_e, I.n_d)
+        for e = 1:I.n_e, d = 1:I.n_d
+            if sum(
+                I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, l in I.L[d],
+                m = 1:I.n_m
+            ) == 0
+                continue
+            end
+            has_exam[e, d] = true
 
-        prev_exam_l = nothing
-        prev_m = nothing
-        prev_j = nothing
-        prev_s = nothing
-        lunch_pause_added = false
-        for l = r[e, d]:R[e, d]
-            if sum(I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, m = 1:I.n_m) > 0
-                j = nothing
-                m = nothing
-                for j_tilde = 1:I.n_j
-                    if I.λ[e, j_tilde]
-                        for m_tilde = 1:I.n_m
-                            if sum(x[i, j_tilde, l, m_tilde] for i = 1:I.n_i) > 0
-                                j = j_tilde
-                                m = m_tilde
-                                break
+            prev_exam_l = nothing
+            prev_m = nothing
+            prev_j = nothing
+            prev_s = nothing
+            lunch_pause_added = false
+            for l = r[e, d]:R[e, d]
+                if sum(
+                    I.λ[e, j] * x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j, m = 1:I.n_m
+                ) > 0
+                    j = nothing
+                    m = nothing
+                    for j_tilde = 1:I.n_j
+                        if I.λ[e, j_tilde]
+                            for m_tilde = 1:I.n_m
+                                if sum(x[i, j_tilde, l, m_tilde] for i = 1:I.n_i) > 0
+                                    j = j_tilde
+                                    m = m_tilde
+                                    break
+                                end
                             end
                         end
                     end
-                end
-                s = I.groups[j].s
+                    s = I.groups[j].s
 
-                if !isnothing(prev_exam_l)
-                    total_empty_time = l - prev_exam_l - 1
+                    if !isnothing(prev_exam_l)
+                        total_empty_time = l - prev_exam_l - 1
 
-                    discontinuity_in_between = (total_empty_time > I.ν[prev_s] - 1)
-                    class_time_in_between = sum(
-                        I.α[e, l_tilde] * !I.β[e, l_tilde] * (1 - q[e, l_tilde]) for
-                        l_tilde = prev_exam_l+I.ν[prev_s]-1:l-I.μ[prev_s];
-                        init = 0,
-                    )
-                    wanted_empty_time = I.ν[prev_s] - 1
-                    wanted_empty_time += max(
-                        discontinuity_in_between * max(I.τ_seq, I.μ[s]),
-                        (prev_m != m) * I.τ_room,
-                        (prev_j != j) * I.τ_swi,
-                        class_time_in_between,
-                    )
+                        discontinuity_in_between = (total_empty_time > I.ν[prev_s] - 1)
+                        class_time_in_between = sum(
+                            I.α[e, l_tilde] * !I.β[e, l_tilde] * (1 - q[e, l_tilde]) for
+                            l_tilde = prev_exam_l+I.ν[prev_s]-1:l-I.μ[prev_s];
+                            init = 0,
+                        )
+                        wanted_empty_time = I.ν[prev_s] - 1
+                        wanted_empty_time += max(
+                            discontinuity_in_between * max(I.τ_seq, I.μ[s]),
+                            (prev_m != m) * I.τ_room,
+                            (prev_j != j) * I.τ_swi,
+                            class_time_in_between,
+                        )
 
-                    if !lunch_pause_added
-                        prev_exam_end = prev_exam_l + I.ν[prev_s] - 1
-                        end_in_lunch_window =
-                            (I.V[d][1] <= prev_exam_end && prev_exam_end <= I.V[d][end])
-                        lunch_wasted_time =
-                            total_empty_time - (I.ν[prev_s] - 1 + I.τ_lun + I.μ[s])
-                        enough_time_for_lunch =
-                            lunch_wasted_time >= 0 &&
-                            wanted_empty_time <= total_empty_time - lunch_wasted_time
-                        if end_in_lunch_window && enough_time_for_lunch
-                            @assert discontinuity_in_between
-                            lunch_pause_added = true
-                            wanted_empty_time = I.ν[prev_s] - 1 + I.τ_lun + I.μ[s]
+                        if !lunch_pause_added
+                            prev_exam_end = prev_exam_l + I.ν[prev_s] - 1
+                            end_in_lunch_window =
+                                (I.V[d][1] <= prev_exam_end && prev_exam_end <= I.V[d][end])
+                            lunch_wasted_time =
+                                total_empty_time - (I.ν[prev_s] - 1 + I.τ_lun + I.μ[s])
+                            enough_time_for_lunch =
+                                lunch_wasted_time >= 0 &&
+                                wanted_empty_time <= total_empty_time - lunch_wasted_time
+                            if end_in_lunch_window && enough_time_for_lunch
+                                @assert discontinuity_in_between
+                                lunch_pause_added = true
+                                wanted_empty_time = I.ν[prev_s] - 1 + I.τ_lun + I.μ[s]
+                            end
+                        end
+
+                        unwanted_empty_time = total_empty_time - wanted_empty_time
+                        if unwanted_empty_time > 0
+                            unwanted_breaks[e, d] += unwanted_empty_time
                         end
                     end
 
-                    unwanted_empty_time = total_empty_time - wanted_empty_time
-                    @assert unwanted_empty_time >= 0
-                    if unwanted_empty_time > 0
-                        unwanted_breaks[e, d] += unwanted_empty_time
-                    end
+                    prev_exam_l = l
+                    prev_m = m
+                    prev_j = j
+                    prev_s = s
                 end
-
-                prev_exam_l = l
-                prev_m = m
-                prev_j = j
-                prev_s = s
             end
         end
+        mean_unwanted_breaks_min =
+            sum(unwanted_breaks) / sum(has_exam) * Int(I.Δ_l / Minute(1))
+        detailed_soft_constraints["mean_examiner_unwanted_breaks"] =
+            Hour(div(mean_unwanted_breaks_min, 60)) +
+            Minute(ceil(mean_unwanted_breaks_min % 60))
     end
-    mean_unwanted_breaks_min = sum(unwanted_breaks) / sum(has_exam) * Int(I.Δ_l / Minute(1))
-    detailed_soft_constraints["mean_examiner_unwanted_breaks"] =
-        Time(div(mean_unwanted_breaks_min, 60), ceil(mean_unwanted_breaks_min % 60))
 
     return objective, detailed_objective, detailed_soft_constraints
 end
