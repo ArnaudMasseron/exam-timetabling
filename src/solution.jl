@@ -95,17 +95,17 @@ function write_solution_json(
     end
 end
 
-function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = false)
-    print_error(constraint_name::String) =
-        (verbose ? println("Error in constraint " * constraint_name) : nothing)
+function is_solution_feasible(I::Instance, x::Array{Bool,4})
+    is_feasible = true
+    pb_constraints = Vector{String}()
 
     # --- Exam related constraints --- #
     # Exam needed
     for i = 1:I.n_i, j = 1:I.n_j
         LHS = sum(x[i, j, l, m] for l = 1:I.n_l, m = 1:I.n_m; init = 0)
         if LHS != Int(I.γ[i, j])
-            print_error("exam needed (i=$i, j=$j)")
-            return false
+            push!(pb_constraints, "exam needed (i=$i, j=$j)")
+            is_feasible = false
         end
     end
 
@@ -114,8 +114,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         LHS = sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j]; init = 0)
 
         if !(LHS in [0, I.η[I.groups[j].s]])
-            print_error("exam student number (j=$j, l=$l, m=$m)")
-            return false
+            push!(pb_constraints, "exam student number (j=$j, l=$l, m=$m)")
+            is_feasible = false
         end
     end
 
@@ -127,42 +127,58 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             init = 0,
         )
         if big_sum > 0
-            print_error("exam start and end")
-            return false
+            push!(pb_constraints, "exam start and end")
+            is_feasible = false
         end
     end
 
-    # Exam break
+    # Exam break min duration
     let
-        M = [ceil((max(I.τ_seq, I.μ[s]) + 1) / I.ν[s]) for s = 1:I.n_s]
+        M = [ceil(max(I.τ_seq, I.μ[s]) / I.ν[s]) for s = 1:I.n_s]
 
-        for j = 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
-            m = 1:I.n_m
+        for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d][1+I.ν[I.groups[j].s]:end]
 
             LHS =
                 sum(
                     x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for
-                    t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]));
+                    t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]) - 1),
+                    m = 1:I.n_m;
                     init = 0,
                 ) / I.η[I.groups[j].s]
 
             RHS =
                 M[I.groups[j].s] * (
-                    I.ρ[I.groups[j].s] -
+                    1 +
                     sum(
-                        x[i_prime, j, l-a*I.ν[I.groups[j].s], m_tilde] for
-                        i_prime = 1:I.n_i if I.γ[i_prime, j] for m_tilde = 1:I.n_m,
-                        a = 1:I.ρ[I.groups[j].s];
-                        init = 0,
+                        x[i, j, l, m] - x[i, j, l-I.ν[I.groups[j].s], m] for
+                        i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m
                     ) / I.η[I.groups[j].s]
                 )
 
             if LHS > RHS
-                print_error("exam break (j=$j, d=$d, l=$l, m=$m)")
-                return false
+                push!(pb_constraints, "exam break min duration (j=$j, d=$d, l=$l)")
+                is_feasible = false
             end
+        end
+    end
+
+    # Exam break series end
+
+    for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end]
+
+        LHS = sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m) / I.η[I.groups[j].s]
+
+        RHS =
+            I.ρ[I.groups[j].s] -
+            sum(
+                x[i, j, l-a*I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j] for
+                m = 1:I.n_m, a = 1:I.ρ[I.groups[j].s];
+                init = 0,
+            ) / I.η[I.groups[j].s]
+
+        if LHS > RHS
+            push!(pb_constraints, "exam break series end (j=$j, d=$d, l=$l)")
+            is_feasible = false
         end
     end
 
@@ -173,8 +189,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         RHS = prod(I.θ[i, l-I.μ[s]:l+I.ν[s]-1])
 
         if LHS > RHS
-            print_error("student availability (s=$s, i=$i, d=$d, l=$l)")
-            return false
+            push!(pb_constraints, "student availability (s=$s, i=$i, d=$d, l=$l)")
+            is_feasible = false
         end
     end
 
@@ -183,8 +199,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         LHS = sum(x[i, j, l, m] for j = 1:I.n_j if I.γ[i, j] for m = 1:I.n_m; init = 0)
 
         if LHS > 1
-            print_error("student one exam 1 (i=$i, l=$l)")
-            return false
+            push!(pb_constraints, "student one exam 1 (i=$i, l=$l)")
+            is_feasible = false
         end
     end
 
@@ -214,8 +230,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
                 )
 
             if LHS > RHS
-                print_error("student one exam 2 (i=$i, s=$s, d=$d, l=$l)")
-                return false
+                push!(pb_constraints, "student one exam 2 (i=$i, s=$s, d=$d, l=$l)")
+                is_feasible = false
             end
         end
     end
@@ -227,24 +243,33 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             init = 0,
         )
         if LHS > I.ξ
-            print_error("student max exams (i=$i, d=$d)")
-            return false
+            push!(pb_constraints, "student max exams (i=$i, d=$d)")
+            is_feasible = false
         end
     end
 
     # --- Group related constraints --- #
     # Group availability
-    for j = 1:I.n_j,
+    for s = 1:I.n_s,
+        j in I.J[s],
+        e in I.groups[j].e,
         d = 1:I.n_d,
-        l in I.L[d][1+I.μ[I.groups[j].s]:end-(I.ν[I.groups[j].s]-1)]
+        l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
 
         s = I.groups[j].s
-        LHS = sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0)
-        RHS = I.η[s] * prod(I.α[I.groups[j].e, l-I.μ[s]:l+I.ν[s]-1])
+        LHS =
+            length(I.groups[j].e) *
+            length(-I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1) *
+            sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0)
+        RHS =
+            I.η[I.groups[j].s] * sum(
+                I.α[e, l+t] for e in I.groups[j].e,
+                t = -I.μ[I.groups[j].s]:I.ν[I.groups[j].s]-1
+            )
 
         if LHS > RHS
-            print_error("group availaibility (j=$j, d=$d, l=$l)")
-            return false
+            push!(pb_constraints, "group availaibility (s=$s, j=$j, e=$e, d=$d, l=$l)")
+            is_feasible = false
         end
     end
 
@@ -267,8 +292,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             ) / I.η[s]
 
         if LHS > RHS
-            print_error("group one exam (s=$s, j=$j, d=$d, l=$l)")
-            return false
+            push!(pb_constraints, "group one exam (s=$s, j=$j, d=$d, l=$l)")
+            is_feasible = false
         end
     end
 
@@ -281,7 +306,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             possible_break_l = true
             for j in valid_j
                 LHS = sum(
-                    x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t =
+                    x[i, j, l+t, m] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]
+                    for i = 1:I.n_i if I.γ[i, j] for t =
                         max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
                             I.L[d][end] - l,
                             I.μ[I.groups[j].s] + I.τ_lun - 1,
@@ -299,8 +325,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         end
 
         if !at_least_one_break
-            print_error("examiner lunch break (e=$e, d=$d)")
-            return false
+            push!(pb_constraints, "examiner lunch break (e=$e, d=$d)")
+            is_feasible = false
         end
     end
 
@@ -317,8 +343,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             sum(x[i, k, l+t, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
             I.η[I.groups[k].s]
         if LHS > 1
-            print_error("group switch break (j=$j, k=$k, d=$d, l=$l, t=$t)")
-            return false
+            push!(pb_constraints, "group switch break (j=$j, k=$k, d=$d, l=$l, t=$t)")
+            is_feasible = false
         end
     end
 
@@ -330,8 +356,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
             init = 0,
         )
         if LHS > I.ζ[e]
-            print_error("examiner max exams (e=$e, d=$d)")
-            return false
+            push!(pb_constraints, "examiner max exams (e=$e, d=$d)")
+            is_feasible = false
         end
     end
 
@@ -351,8 +377,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         end
 
         if nb_days == 0 || nb_days > I.κ[e]
-            print_error("group max days (e=$e, d=$d)")
-            return false
+            push!(pb_constraints, "group max days (e=$e, d=$d)")
+            is_feasible = false
         end
     end
 
@@ -382,8 +408,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
                 )
 
             if LHS > RHS
-                print_error("room switch break (j=$j, d=$d, l=$l, m=$m)")
-                return false
+                push!(pb_constraints, "room switch break (j=$j, d=$d, l=$l, m=$m)")
+                is_feasible = false
             end
         end
     end
@@ -395,8 +421,8 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
         RHS = I.η[s] * I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
 
         if LHS > RHS
-            print_error("room availability (s=$s, d=$d, l=$l, m=$m)")
-            return false
+            push!(pb_constraints, "room availability (s=$s, d=$d, l=$l, m=$m)")
+            is_feasible = false
         end
     end
 
@@ -422,13 +448,16 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4}; verbose::Bool = fal
                 )
 
             if LHS > RHS
-                print_error("room group occupation (j=$j, k=$k, d=$d, l=$l, m=$m)")
-                return false
+                push!(
+                    pb_constraints,
+                    "room group occupation (j=$j, k=$k, d=$d, l=$l, m=$m)",
+                )
+                is_feasible = false
             end
         end
     end
 
-    return true
+    return true, pb_constraints
 end
 
 function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = false)
