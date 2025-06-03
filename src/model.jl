@@ -456,13 +456,25 @@ function declare_CM(I::Instance, model::Model)
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
-    q_coef = 80 / sum(.!I.β) # examiner availability
+    # Student harmonious exams
+    y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε))
+
+    # Examiner availability
+    q_coef = 80 / sum(.!I.β)
+    !isfinite(q_coef) && (q_coef = 0)
+
+    # Examiner max days
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
-    z_coef = 50 / sum(I.γ) # exam continuity
-    R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam early
-    Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e)
+
+    # Exam continuity
+    z_coef = 50 / sum(I.γ)
+
+    # Exam early
+    R_coef = 10 / (I.n_l / I.n_d * sum(I.κ))
+
+    # Exam grouped
+    Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ))
 
     objective =
         y_coef * sum(y) +
@@ -865,12 +877,22 @@ function declare_RSD_jl(I::Instance, model::Model)
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    q_coef = 80 / sum(.!I.β) # examiner availability
+    # Examiner availability
+    q_coef = 80 / sum(.!I.β)
+    !isfinite(q_coef) && (q_coef = 0)
+
+    # Examiner max days
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
-    z_coef = 50 / sum(I.γ) # exam continuity
-    R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam early
-    Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e)
+
+    # Exam continuity
+    z_coef = 50 / sum(I.γ)
+
+    # Exam early
+    R_coef = 10 / (I.n_l / I.n_d * sum(I.κ))
+
+    # Exam grouped
+    Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ))
 
     objective =
         q_coef * sum(q) +
@@ -1319,12 +1341,22 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
-    q_coef = 80 / sum(!I.β[e, l] for e in valid_e, l in l_range) # examiner availability
+    # Examiner availability
+    q_coef = 80 / sum(!I.β[e, l] for e in valid_e, l in l_range)
+    !isfinite(q_coef) && (q_coef = 0)
+
+    # Examiner max days
     is_expert(e) = (SplitI.I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum(is_expert(e) * SplitI.κ[e] for e in valid_e) # examiner max days
-    z_coef = 50 / length(valid_ij) # exam continuity
-    R_coef = 10 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam early
-    Rr_coef = 50 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e)) # exam grouped
+    w_coef = 60 / sum(is_expert(e) * SplitI.κ[e] for e in valid_e)
+
+    # Exam continuity
+    z_coef = 50 / length(valid_ij)
+
+    # Exam early
+    R_coef = 10 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e))
+
+    # Exam grouped
+    Rr_coef = 50 / (length(l_range) / length(d_range) * sum(SplitI.κ[e] for e in valid_e))
 
     objective =
         q_coef * sum(q) +
