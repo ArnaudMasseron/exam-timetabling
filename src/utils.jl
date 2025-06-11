@@ -26,9 +26,10 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
     for j = 1:I.n_j, m = 1:I.n_m, l = 1:I.n_l
         if sum(x_values[i, j, l, m] for i = 1:I.n_i) > 0
             s = I.groups[j].s
-            students_in_serie = []
+            !I.dataset["subjects"][s]["group_students_by_class"] && continue
 
             # Find the students in the current exam series
+            students_in_serie = []
             let curr_l = l
                 while true
                     @assert curr_l <= I.n_l
