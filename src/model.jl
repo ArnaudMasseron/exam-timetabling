@@ -118,12 +118,21 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Remove useless q
-    fix.(q[.!I.α.||I.β], 0; force = true)
+    let fix_ids = [(e, l) for e = 1:I.n_e, l = 1:I.n_l if !I.α[e, l] || I.β[e, l]]
+        fix.([q[e, l] for (e, l) in fix_ids], 0; force = true)
+    end
 
-    # Group one block cancelation
+    # Examiner one block cancelation
     @constraint(
         model,
-        group_one_block_cancelation[e = 1:I.n_e, P in I.U[e], a = 1:lastindex(P)-1],
+        examiner_one_block_cancelation[
+            e = 1:I.n_e,
+            P in I.U[e],
+            a in (a for a = 1:lastindex(P)-1 if l_range[1] <= P[a] &&
+                  P[a+1] <= l_range[end] &&
+                  I.α[e, P[a]] &&
+                  I.α[e, P[a+1]]),
+        ],
         q[e, P[a]] == q[e, P[a+1]],
     )
 
@@ -219,7 +228,7 @@ function declare_CM(I::Instance, model::Model)
 
         @constraint(
             model,
-            group_max_days_1[e = 1:I.n_e, d = 1:I.n_d],
+            examiner_max_days_1[e = 1:I.n_e, d = 1:I.n_d],
             sum(
                 x[i, j, l, m] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i if I.γ[i, j] for
                 l in I.L[d], m = 1:I.n_m;
@@ -232,7 +241,7 @@ function declare_CM(I::Instance, model::Model)
     @variable(model, w[e = 1:I.n_e] >= 0)
     @constraint(
         model,
-        group_max_days_2[e = 1:I.n_e],
+        examiner_max_days_2[e = 1:I.n_e],
         (1 + w[e]) .* [-1, 1] .<= [-sum(v[e, d] for d = 1:I.n_d), I.κ[e]]
     )
 
@@ -525,12 +534,21 @@ function declare_RSD_jl(I::Instance, model::Model)
     end
 
     # Remove useless q
-    fix.(q[.!I.α.||I.β], 0; force = true)
+    let fix_ids = [(e, l) for e = 1:I.n_e, l = 1:I.n_l if !I.α[e, l] || I.β[e, l]]
+        fix.([q[e, l] for (e, l) in fix_ids], 0; force = true)
+    end
 
     # Group one block cancelation
     @constraint(
         model,
-        group_one_block_cancelation[e = 1:I.n_e, P in I.U[e], a = 1:lastindex(P)-1],
+        examiner_one_block_cancelation[
+            e = 1:I.n_e,
+            P in I.U[e],
+            a in (a for a = 1:lastindex(P)-1 if l_range[1] <= P[a] &&
+                  P[a+1] <= l_range[end] &&
+                  I.α[e, P[a]] &&
+                  I.α[e, P[a+1]]),
+        ],
         q[e, P[a]] == q[e, P[a+1]],
     )
 
@@ -624,7 +642,7 @@ function declare_RSD_jl(I::Instance, model::Model)
         M(d) = length(I.L[d])
         @constraint(
             model,
-            group_max_days_1[d = 1:I.n_d, e = 1:I.n_e],
+            examiner_max_days_1[d = 1:I.n_d, e = 1:I.n_e],
             sum(f[j, l] for j = 1:I.n_j if I.λ[e, j] for l in I.L[d]; init = 0) <=
             M(d) * v[e, d]
         )
@@ -634,10 +652,10 @@ function declare_RSD_jl(I::Instance, model::Model)
     @variable(model, w[e = 1:I.n_e] >= 0)
     @constraint(
         model,
-        group_max_days_2_1[e = 1:I.n_e],
+        examiner_max_days_2_1[e = 1:I.n_e],
         sum(v[e, d] for d = 1:I.n_d) <= 1 + w[e]
     )
-    @constraint(model, group_max_days_2_2[e = 1:I.n_e], 1 + w[e] <= I.κ[e])
+    @constraint(model, examiner_max_days_2_2[e = 1:I.n_e], 1 + w[e] <= I.κ[e])
 
     # Exam grouped 1
     @variable(model, R[e = 1:I.n_e, d = 1:I.n_d])
@@ -963,18 +981,20 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     end
 
     # Remove useless q
-    let
-        fix_ids = [(e, l) for e in valid_e, l in l_range if !I.α[e, l] || I.β[e, l]]
+    let fix_ids = [(e, l) for e in valid_e, l in l_range if !I.α[e, l] || I.β[e, l]]
         fix.([q[e, l] for (e, l) in fix_ids], 0; force = true)
     end
 
-    # Group one block cancelation
+    # Examiner one block cancelation
     @constraint(
         model,
-        group_one_block_cancelation[
+        examiner_one_block_cancelation[
             e in valid_e,
             P in I.U[e],
-            a in (a for a = 1:lastindex(P)-1 if l_range[1] <= P[a] && P[a+1] <= l_range[end]),
+            a in (a for a = 1:lastindex(P)-1 if l_range[1] <= P[a] &&
+                  P[a+1] <= l_range[end] &&
+                  I.α[e, P[a]] &&
+                  I.α[e, P[a+1]]),
         ],
         q[e, P[a]] == q[e, P[a+1]],
     )
@@ -1075,7 +1095,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         M(d) = length(I.L[d])
         @constraint(
             model,
-            group_max_days_1[d = d_range, e in valid_e],
+            examiner_max_days_1[d = d_range, e in valid_e],
             sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]; init = 0) <=
             M(d) * v[e, d]
         )
@@ -1085,10 +1105,10 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     @variable(model, w[e in valid_e] >= 0)
     @constraint(
         model,
-        group_max_days_2_1[e in valid_e],
+        examiner_max_days_2_1[e in valid_e],
         sum(v[e, d] for d in d_range) <= 1 + w[e]
     )
-    @constraint(model, group_max_days_2_2[e in valid_e], 1 + w[e] <= SplitI.κ[e])
+    @constraint(model, examiner_max_days_2_2[e in valid_e], 1 + w[e] <= SplitI.κ[e])
 
     # Exam grouped 1
     @variable(model, R[e in valid_e, d = d_range])
