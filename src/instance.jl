@@ -46,7 +46,7 @@ Base.@kwdef struct Instance
 
     S_exa::Vector{Set{Int}}
     S_stu::Vector{Set{Int}}
-    U::Vector{Vector{Vector{Int}}}
+    U::Vector{Set{Vector{Int}}}
     J::Vector{Set{Int}}
     L::Vector{Vector{Int}}
     V::Vector{Vector{Int}}
@@ -166,7 +166,14 @@ function read_instance(path::String)
             end_datetime = DateTime(end_datetime_str)
 
             start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            if start_timeslot == 0 ||
+               Date(timeslots_start_datetime[start_timeslot]) < Date(start_datetime)
+                start_timeslot += 1
+            end
+
             end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+            (end_timeslot > 0 && timeslots_start_datetime[end_timeslot] == end_datetime) &&
+                (end_timeslot -= 1)
 
             for l = start_timeslot:end_timeslot
                 θ[i, l] = false
@@ -178,7 +185,12 @@ function read_instance(path::String)
     ζ = zeros(Int, n_e)
     α = ones(Bool, n_e, n_l)
     β = ones(Bool, n_e, n_l)
-    U = Vector{Vector{Vector{Int}}}([Vector{Vector{Int}}() for e = 1:n_e])
+    U = Vector{Set{Vector{Int}}}([Set{Vector{Int}}() for e = 1:n_e])
+    @assert issorted(dataset["general_parameters"]["exam_time_windows"])
+    exam_days = ([
+        Date(DateTime(start_datetime_str)) for
+        (start_datetime_str, _) in dataset["general_parameters"]["exam_time_windows"]
+    ])
     for (e, dict) in enumerate(dataset["examiners"])
         ζ[e] = dict["max_number_exams_per_day"]
         κ[e] = dict["max_number_days"]
@@ -188,7 +200,15 @@ function read_instance(path::String)
             end_datetime = DateTime(end_datetime_str)
 
             start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            if start_timeslot == 0 ||
+               Date(timeslots_start_datetime[start_timeslot]) < Date(start_datetime)
+                start_timeslot += 1
+            end
+
             end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+            (end_timeslot > 0 && timeslots_start_datetime[end_timeslot] == end_datetime) &&
+                (end_timeslot -= 1)
+
 
             for l = start_timeslot:end_timeslot
                 α[e, l] = false
@@ -200,13 +220,24 @@ function read_instance(path::String)
             end_datetime = DateTime(end_datetime_str)
 
             start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            if start_timeslot == 0 ||
+               Date(timeslots_start_datetime[start_timeslot]) < Date(start_datetime)
+                start_timeslot += 1
+            end
+
             end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+            (end_timeslot > 0 && timeslots_start_datetime[end_timeslot] == end_datetime) &&
+                (end_timeslot -= 1)
 
-            (start_timeslot <= end_timeslot) && push!(U[e], Vector{Int}())
+            if start_timeslot <= end_timeslot
+                obligation = Vector{Int}()
 
-            for l = start_timeslot:end_timeslot
-                β[e, l] = false
-                push!(U[e][end], l)
+                for l = start_timeslot:end_timeslot
+                    β[e, l] = false
+                    push!(obligation, l)
+                end
+
+                push!(U[e], obligation)
             end
         end
     end
@@ -273,7 +304,14 @@ function read_instance(path::String)
             end_datetime = DateTime(end_datetime_str)
 
             start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
+            if start_timeslot == 0 ||
+               Date(timeslots_start_datetime[start_timeslot]) < Date(start_datetime)
+                start_timeslot += 1
+            end
+
             end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
+            (end_timeslot > 0 && timeslots_start_datetime[end_timeslot] == end_datetime) &&
+                (end_timeslot -= 1)
 
             for l = start_timeslot:end_timeslot
                 δ[m, l] = false
@@ -326,7 +364,7 @@ function read_instance(path::String)
     )
 end
 
-function check_infeasible_basic(I::Instance)
+function check_infeasible_basic(I::Instance; fill_rate = 1)
     #= Perform basic preliminary tests in order to see if an instance is infeasible or not =#
 
     # Feasible amount of students for exams with multiple simultaneous students
@@ -350,9 +388,9 @@ function check_infeasible_basic(I::Instance)
             end
         end
 
-        available_time = I.n_l - sum(.!I.θ[i, :])
+        available_time = fill_rate * (I.n_l - sum(.!I.θ[i, :]))
 
-        @assert time_needed <= available_time "Not enough time to schedule all of student $(i)'s exams"
+        @assert time_needed <= available_time "Not enough time to schedule all of student $(i)'s exams. Time needed : $time_needed, available time $available_time"
     end
 
     # Student enough days
@@ -360,7 +398,7 @@ function check_infeasible_basic(I::Instance)
         nb_days_needed = sum(I.γ[i, :]) / I.ξ
         nb_days_available = sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d = 1:I.n_d)
 
-        @assert nb_days_needed <= nb_days_available "Not enough days to schedule all of student $(i)'s exams"
+        @assert nb_days_needed <= nb_days_available "Not enough days to schedule all of student $(i)'s exams. Days needed : $nb_days_needed, available days : $nb_days_available"
     end
 
     # Examiner enough time or days
@@ -369,16 +407,20 @@ function check_infeasible_basic(I::Instance)
         nb_exams = 0
         for j = 1:I.n_j
             if I.λ[e, j]
-                nb_exams += 1
                 s = I.groups[j].s
-                time_needed += I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]
+                for i = 1:I.n_i
+                    if I.γ[i, j]
+                        nb_exams += 1
+                        time_needed += (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+                    end
+                end
             end
         end
-        available_time = I.n_l - I.n_d * I.τ_lun - sum(.!I.α[e, :])
+        available_time = fill_rate * (I.n_l - sum(.!I.α[e, :]))
         days_needed = max(ceil(time_needed / available_time), ceil(nb_exams / I.ζ[e]))
 
-        @assert time_needed <= available_time "Not enough time to schedule all of examiner $(e)'s exams"
-        @assert days_needed <= I.κ[e] "Not enough days to schedule all of examiner $(e)'s exams"
+        @assert time_needed <= available_time "Not enough time to schedule all of examiner $(e)'s exams. Time needed : $time_needed, filling rate * available time : $available_time"
+        @assert days_needed <= I.κ[e] "Not enough days to schedule all of examiner $(e)'s exams. Days needed : $days_needed, available days : $(I.κ[e])"
     end
 end
 
@@ -391,129 +433,146 @@ function declare_splitting_MILP(
     model::Model,
 )
     # --- Main decision variables --- #
-    @variable(model, x[exam in exams, split = 1:n_splits], binary = true)
-
+    @variable(model, y[exam in exams, d = 1:I.n_d], binary = true)
 
     # --- Constraints --- #
-    # Exam one split
+    # Exam needed
+    @constraint(model, exam_needed[exam in exams], sum(y[exam, d] for d = 1:I.n_d) == 1)
+
+    # Group enough time
+    @variable(model, t[e = 1:I.n_e, P in I.U[e]], binary = true)
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+        function helper_group_available_time(j, d)
+            # Count the timeslots were exams can be scheduled
+            s = I.groups[j].s
+            group_alpha = [prod(I.α[e, l] for e in I.groups[j].e) for l in I.L[d]]
+            group_nb_timeslots_avail = 0
+            prev_l_loc = nothing
+            for (l_loc, val) in enumerate(group_alpha)
+                if isnothing(prev_l_loc) && val
+                    prev_l_loc = l_loc
+                elseif !isnothing(prev_l_loc) && !val
+                    time_in_bloc = l_loc - prev_l_loc + I.τ_seq
+                    group_nb_timeslots_avail +=
+                        time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
+                    prev_l_loc = l_loc - 1
+                end
+            end
+            if !isnothing(prev_l_loc)
+                time_in_bloc = length(I.L[d]) + 1 - prev_l_loc + I.τ_seq
+                group_nb_timeslots_avail +=
+                    time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
+            end
+
+            return fill_rate * group_nb_timeslots_avail
+        end
+
+        @constraint(
+            model,
+            group_enough_time[j = 1:I.n_j, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if j == exam[2];
+                init = 0,
+            ) <= helper_group_available_time(j, d)
+        )
+    end
+
+    # Examiner enough time
+    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true) # j has an exam on d implies v[j, d] == 1
     @constraint(
         model,
-        exam_one_split[exam in exams],
-        sum(x[exam, split] for split = 1:n_splits) == 1
+        group_has_exam[j = 1:I.n_j, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) <=
+        sum(I.γ[:, j]) * v[j, d]
+    )
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+        @constraint(
+            model,
+            examiner_enough_time[e = 1:I.n_e, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if I.λ[e, exam[2]];
+                init = 0,
+            ) + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
+            fill_rate * (
+                sum(I.α[e, l] for l in I.L[d]) + sum(
+                    prod(I.α[e, l] for l in P) * length(P) * (t[e, P] - 1) for P in I.U[e];
+                    init = 0,
+                )
+            )
+        )
+    end
+
+    # Examiner max exams
+    @variable(model, z[e = 1:I.n_e, d = 1:I.n_d], binary = true)
+    @constraint(
+        model,
+        examiner_max_exams[e = 1:I.n_e, d = 1:I.n_d],
+        sum(
+            y[exam, d] / I.η[I.groups[exam[2]].s] for
+            exam in exams if e in I.groups[exam[2]].e;
+            init = 0,
+        ) <= I.ζ[e] * z[e, d]
     )
 
-    # Feasible amount of students in each split for exams with multiple simultaneous students
-    @variable(model, r[j = 1:I.n_j, split = 1:n_splits] >= 0, integer = true)
+    # Examiner max days
     @constraint(
         model,
-        group_feasible_amount_students[j = 1:I.n_j, split = 1:n_splits],
-        sum(x[exam, split] for exam in exams if exam[2] == j; init = 0) ==
-        r[j, split] * I.η[I.groups[j].s]
+        examiner_max_days[e = 1:I.n_e],
+        sum(z[e, d] for d = 1:I.n_d) <= I.κ[e]
+    )
+
+    # Rooms enough time
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+        @constraint(
+            model,
+            rooms_enough_time[(room_type, dict) in I.room_type_data, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if I.groups[exam[2]].s in dict["subjects"];
+                init = 0,
+            ) <= fill_rate * sum(I.δ[m, l] for l in I.L[d], m in dict["rooms"])
+        )
+    end
+
+    # Feasible amount of students each day for exams with multiple simultaneous students
+    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= 0, integer = true)
+    @constraint(
+        model,
+        group_feasible_amount_students[j = 1:I.n_j, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) ==
+        r[j, d] * I.η[I.groups[j].s]
     )
 
     # Student enough time
-    @constraint(
-        model,
-        student_enough_time[i = 1:I.n_i, split = 1:n_splits],
-        sum(
-            let s = I.groups[exam[2]].s
-                x[exam, split] * (I.ν[s] + I.μ[s] + I.τ_stu)
-            end for exam in exams if i == exam[1];
-            init = 0,
-        ) <= fill_rate * sum(I.θ[i, l] for d in days_split[split] for l in I.L[d])
-    )
+    let exam_length(s) = I.ν[s] + I.μ[s] + I.τ_stu
+        @constraint(
+            model,
+            student_enough_time[i = 1:I.n_i, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if i == exam[1];
+                init = 0,
+            ) <= fill_rate * sum(I.θ[i, l] for l in I.L[d])
+        )
+    end
 
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, split = 1:n_splits],
-        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0) <=
-        sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d in days_split[split]) * I.ξ
+        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[1] == i; init = 0) <= I.ξ
     )
 
-    # Examiner enough time
-    @variable(model, t[e = 1:I.n_e, u = 1:length(I.U[e])], binary = true)
-
-    function helper_examiner_available_time(e, split)
-        expr = zero(AffExpr)
-        for d in days_split[split]
-            add_to_expression!(expr, length(I.L[d]) - I.τ_lun)
-
-            for l in I.L[d]
-                add_to_expression!(expr, -(!I.α[e, l] || !I.β[e, l]))
-            end
-
-            for u in eachindex(I.U[e])
-                @assert issorted(I.U[e][u])
-                for l in I.U[e][u]
-                    idx = searchsortedlast(I.L[d], l)
-                    if idx != 0 && I.L[d] == l
-                        add_to_expression!(expr, length(I.U[e][u]) * t[e, u])
-                        break
-                    end
-                end
-            end
-        end
-        expr *= fill_rate
-
-        return expr
-    end
+    # Exam_availability
     @constraint(
         model,
-        examiner_enough_time[e = 1:I.n_e, split = 1:n_splits],
-        sum(
-            let s = I.groups[exam[2]].s
-                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam in exams if e in I.groups[exam[2]].e;
-            init = 0,
-        ) <= helper_examiner_available_time(e, split)
-    )
-
-    # Examiner max days
-    @variable(
-        model,
-        0 <= z[e = 1:I.n_e, split = 1:n_splits] <= length(days_split[split]),
-        integer = true
-    )
-    @constraint(
-        model,
-        examiner_max_days_1[e = 1:I.n_e, split = 1:n_splits],
-        sum(
-            x[exam, split] / I.η[I.groups[exam[2]].s] for
-            exam in exams if e in I.groups[exam[2]].e;
-            init = 0,
-        ) <= z[e, split] * I.ζ[e]
-    )
-    @constraint(
-        model,
-        examiner_max_days_2[e = 1:I.n_e, split = 1:n_splits],
-        sum(
-            let s = I.groups[exam[2]].s
-                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam in exams if e in I.groups[exam[2]].e;
-            init = 0,
-        ) <=
-        z[e, split] * fill_rate * sum(length(I.L[d]) - I.τ_lun for d in days_split[split]) /
-        length(days_split[split])
-    )
-    @constraint(
-        model,
-        examiner_max_days_3[e = 1:I.n_e],
-        sum(z[e, split] for split = 1:n_splits) <= I.κ[e]
-    )
-
-    # Rooms enough time
-    @constraint(
-        model,
-        rooms_enough_time[(room_type, dict) in I.room_type_data, split = 1:n_splits],
-        sum(
-            let s = I.groups[exam[2]].s
-                x[exam, split] * (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-            end for exam in exams if I.groups[exam[2]].s in dict["subjects"];
-            init = 0,
-        ) <=
-        fill_rate *
-        sum(I.δ[m, l] for d in days_split[split] for l in I.L[d], m in dict["rooms"])
+        exam_availability[exam in exams, d = 1:I.n_d],
+        sum(1 - z[e, d] for e in I.groups[exam[2]].e) +
+        (sum(I.θ[exam[1], l] for l in I.L[d]) == 0) <=
+        (length(I.groups[exam[2]].e) + 1) * (1 - y[exam, d])
     )
 
     # Harmonious exam distribution between splits
@@ -522,7 +581,7 @@ function declare_splitting_MILP(
         model,
         split_harmonious_exams_1[split = 1:n_splits],
         p[split] >=
-        sum(x[exam, split] for exam in exams) -
+        sum(y[exam, d] for exam in exams, d in days_split[split]) -
         length(exams) * length(days_split[split]) / I.n_d
     )
     @constraint(
@@ -530,7 +589,7 @@ function declare_splitting_MILP(
         split_harmonious_exams_2[split = 1:n_splits],
         p[split] >=
         length(exams) * length(days_split[split]) / I.n_d -
-        sum(x[exam, split] for exam in exams)
+        sum(y[exam, d] for exam in exams, d in days_split[split])
     )
 
     # Student harmonious exams
@@ -539,27 +598,35 @@ function declare_splitting_MILP(
         model,
         student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0) -
-        I.ε[i] * length(days_split[split]) / I.n_d
+        sum(
+            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
+            init = 0,
+        ) - I.ε[i] * length(days_split[split]) / I.n_d
     )
     @constraint(
         model,
         student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
         q[i, split] >=
-        I.ε[i] * length(days_split[split]) / I.n_d -
-        sum(x[exam, split] for exam in exams if exam[1] == i; init = 0)
+        I.ε[i] * length(days_split[split]) / I.n_d - sum(
+            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
+            init = 0,
+        )
     )
 
 
     # --- Objective --- #
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    z_coef = 50 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
-    p_coef = 20 * sum(I.ε)
-    q_coef = 20 / length(exams)
+    z_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    p_coef = 30 / length(exams)
+    q_coef = 30 / sum(I.ε)
+    t_coef = 80 / sum(length(P) for e = 1:I.n_e for P in I.U[e])
+    !isfinite(t_coef) && (t_coef = 0)
+
     objective =
-        z_coef * sum((is_expert(e) ? 4 : 1) * sum(z[e, :]) for e = 1:I.n_e) +
+        z_coef * sum(is_expert(e) * sum(z[e, :]) for e = 1:I.n_e) +
         p_coef * sum(p) +
-        q_coef * sum(q)
+        q_coef * sum(q) +
+        t_coef * sum(t)
     @objective(model, Min, objective)
 end
 
@@ -567,12 +634,13 @@ function create_split_instances(
     I::Instance,
     exams::Vector{Tuple{Int,Int}},
     days_split::Vector{UnitRange{Int}},
-    x_values,
+    y_values,
+    z_values,
 )
     nb_exams_examiner = zeros(Float64, I.n_e, n_splits)
     exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
     for exam in exams, split = 1:n_splits
-        if x_values[exam, split] >= 0.5
+        if sum(y_values[exam, d] for d in days_split[split]) >= 0.5
             push!(exam_splits[split], exam)
 
             j = exam[2]
@@ -582,31 +650,10 @@ function create_split_instances(
         end
     end
 
-    # Create the split instance kappa vectors
-    κ_splits = zeros(Int, I.n_e, n_splits)
-    for e = 1:I.n_e
-        nb_total_exams_examiner = sum(I.λ[e, j] && I.γ[i, j] for i = 1:I.n_i, j = 1:I.n_j)
-        nb_days_available_examiner = I.κ[e]
-        exam_perc = nb_exams_examiner[e, :] / nb_total_exams_examiner
-
-        while nb_days_available_examiner > 0
-            days_perc = κ_splits[e, :] / I.κ[e]
-
-            # Compute the days percentage to exam percentage ratio
-            ratio = map(x -> (isnan(x) ? Inf : x), days_perc ./ exam_perc)
-            split_id = argmin(ratio)
-
-            # Add a day to the split with the lowest ratio
-            κ_splits[e, split_id] += 1
-
-            nb_days_available_examiner -= 1
-        end
-
-        # Check if a split containing an exam for e has a maximum days limit of at least 1 for e
-        for split_id = 1:n_splits
-            @assert nb_exams_examiner[e, split_id] == 0 || κ_splits[e, split_id] > 0
-        end
-    end
+    κ_splits = [
+        Int(round(sum(z_values[e, d] for d in days_split[split]))) for e = 1:I.n_e,
+        split = 1:n_splits
+    ]
 
     # Create the split instances vector
     split_instances = [
@@ -639,7 +686,7 @@ function find_problematic_exams(RSD_jl_split_warm::Model)
 
     # Solve the problem with exam needed as a soft constraint
     optimize!(RSD_jl_split_warm)
-    @assert termination_status(RSD_jl_split_warm) != MOI.INFEASIBLE_OR_UNBOUNDED "The time limit is too small."
+    @assert has_values(RSD_jl_split_warm) "The time limit is too small."
 
     # Get the indexes of the problematic exams
     c_values = value.(c)
@@ -660,6 +707,7 @@ function split_instance(
     fill_rate = 0.9,
     time_limit_sec = nothing,
     n_max_tries = 5,
+    print_pb_constraints = false,
 )
     #= 
     Split the instance into multiple subinstances until a feasible split has been found.
@@ -682,14 +730,20 @@ function split_instance(
     @assert 0 <= fill_rate <= 1 "The filling rate must be between 0 and 1"
 
     # Initialize some data
-    day_step = div(I.n_d, n_splits)
-    days_split = vcat(
-        [(split-1)*day_step+1:split*day_step for split = 1:n_splits-1],
-        [day_step*(n_splits-1)+1:I.n_d],
-    )
+    days_split_size = zeros(Int, n_splits)
+    for d = 1:I.n_d
+        split_id = (d - 1) % n_splits + 1
+        days_split_size[split_id] += 1
+    end
+    days_split = Vector{UnitRange{Int}}()
+    let d = 0
+        for split_size in days_split_size
+            push!(days_split, d .+ (1:split_size))
+            d += split_size
+        end
+    end
 
     exams = sort([(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]])
-    n_exams = length(exams)
 
     # Declare the splitting model
     model = Model(Gurobi.Optimizer)
@@ -710,11 +764,11 @@ function split_instance(
             remaining_exams = setdiff!(exams, completely_removed_exams)
 
             # Actualise the exam one split constraint
-            delete(model, model[:exam_one_split].data)
-            model[:exam_one_split] = @constraint(
+            delete(model, model[:exam_needed].data)
+            model[:exam_needed] = @constraint(
                 model,
                 [exam in remaining_exams],
-                sum(model[:x][exam, split] for split = 1:n_splits) == 1
+                sum(model[:y][exam, d] for d = 1:I.n_d) == 1
             )
 
             # Remove the exams from the instance
@@ -723,21 +777,32 @@ function split_instance(
             end
         end
 
+        # Warmstart
+        let objective_splitting_MILP = objective_function(model)
+            @objective(model, Min, 0)
+            optimize!(model)
+            @objective(model, Min, objective_splitting_MILP)
+        end
+
         # Solve the MILP splitting problem
         optimize!(model)
 
         # If the model is infeasible the print the problematic constraints
-        if termination_status(model) in [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED]
-            print_constraint_conflicts(model)
-            error("Unable to split the instance. 
-                  This can be the result of a time limit that is too small. 
-                  The problematic constraints have been printed.")
+        if !has_values(model)
+            error_message = "Unable to split the instance.\nThis can be the result of a time limit that is too small, or a filling rate that is too low."
+            if termination_status(model) in [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] &&
+               print_pb_constraints
+                error_message *= "\nThe problematic constraints have been printed."
+                print_constraint_conflicts(model)
+            end
+            error(error_message)
         end
 
         # Read the results
-        x_values = value.(model[:x])
-        @assert prod(sum(x_values[:, split]) > 0 for split = 1:n_splits)
-        split_instances = create_split_instances(I, exams, days_split, x_values)
+        y_values = value.(model[:y])
+        z_values = value.(model[:z])
+        @assert prod(sum(y_values[:, d]) > 0 for d = 1:I.n_d)
+        split_instances = create_split_instances(I, exams, days_split, y_values, z_values)
 
         # Check if the splits instances are feasible by warmstarting the different splits
         g_values_warmstart = zeros(Bool, I.n_i, I.n_j, I.n_l)
@@ -751,22 +816,51 @@ function split_instance(
             optimize!(RSD_jl_split_warm)
 
             # If the split is infeasible then find the exams that cause problem
-            if termination_status(RSD_jl_split_warm) in
-               [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED]
+            if !has_values(RSD_jl_split_warm)
                 feasible_splits_found = false
+
+                if termination_status(RSD_jl_split_warm) in
+                   [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] && print_pb_constraints
+                    print_constraint_conflicts(RSD_jl_split_warm)
+                    flush(stdout)
+                end
 
                 pb_exams = find_problematic_exams(RSD_jl_split_warm)
 
                 # Ban the problematic exams in the splitting in the splitting MILP
-                for exam in pb_exams
-                    if !haskey(banned_exams, exam)
-                        banned_exams[exam] = Set()
-                    end
-                    push!(banned_exams[exam], split)
-                    fix(model[:x][exam, split], 0; force = true)
+                if try_id == n_max_tries
+                    RSD_jl_split_warm = Model(Gurobi.Optimizer)
+                    declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
+                    @objective(RSD_jl_split_warm, Min, 0)
+                    !isnothing(time_limit_sec) && set_optimizer_attribute(
+                        RSD_jl_split_warm,
+                        "TimeLimit",
+                        time_limit_sec,
+                    )
 
-                    if length(banned_exams[exam]) == n_splits
+                    for exam in pb_exams
                         push!(completely_removed_exams, exam)
+
+                        RSD_jl_split_warm[:exam_needed][exam] = @constraint(
+                            RSD_jl_split_warm,
+                            sum(RSD_jl_split_warm[:g][exam[1], exam[2], :]) == 0
+                        )
+                    end
+
+                    optimize!(RSD_jl_split_warm)
+                else
+                    for exam in pb_exams
+                        if !haskey(banned_exams, exam)
+                            banned_exams[exam] = Set()
+                        end
+                        push!(banned_exams[exam], split)
+                        for d in days_split[split]
+                            fix(model[:y][exam, d], 0; force = true)
+                        end
+
+                        if length(banned_exams[exam]) == n_splits
+                            push!(completely_removed_exams, exam)
+                        end
                     end
                 end
             else
@@ -783,8 +877,10 @@ function split_instance(
         try_id += 1
     end
 
-    if !feasible_splits_found
-        error("No feasible solution has been found in under $n_max_tries tries")
+    if !isempty(completely_removed_exams)
+        println_dash(
+            "$(length(completely_removed_exams)) exams have been completely removed",
+        )
     end
 
     return split_instances, g_values_warmstart, completely_removed_exams

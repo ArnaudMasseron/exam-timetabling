@@ -475,11 +475,11 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     # Group availability
     q = zeros(Bool, I.n_e, I.n_l)
-    for j = 1:I.n_j, l = 1:I.n_l
+    for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]
         LHS = sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m; init = 0)
         if LHS > 0
             s = I.groups[j].s
-            for e in I.groups[j].e, t = -I.μ[s]:I.ν[s]-1
+            for e in I.groups[j].e, t = max(I.L[d][1] - l, -I.μ[s]):I.ν[s]-1
                 if !I.β[e, l+t]
                     q[e, l+t] = true
                 end
@@ -566,7 +566,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
     q_coef = 80 / sum(.!I.β) # examiner availability
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    w_coef = 60 / sum((is_expert(e) ? 4 : 1) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
     R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
     Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
@@ -574,7 +574,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
     detailed_objective = [
         y_coef * sum(y),
         q_coef * sum(q),
-        w_coef * sum((is_expert(e) ? 4 : 1) * w[e] for e = 1:I.n_e),
+        w_coef * sum(is_expert(e) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
         Rr_coef * sum(R .- r),
@@ -586,7 +586,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     detailed_soft_constraints["nb_non_harmonious_students"] = sum(y .> 0)
 
-    classes_canceled_min = sum(q) * I.Δ_l.value
+    classes_canceled_min = convert(Minute, sum(q) * I.Δ_l).value
     detailed_soft_constraints["nb_hours_cancelled"] =
         Hour(div(classes_canceled_min, 60)) + Minute(ceil(classes_canceled_min % 60))
 
@@ -596,13 +596,18 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
             continue
         end
 
-        nb_exams_e =
-            sum(I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i)
+        nb_exams_e = Int(
+            ceil(
+                sum(
+                    I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for
+                    i = 1:I.n_i
+                ),
+            ),
+        )
         min_days_1 = Int(ceil(nb_exams_e / I.ζ[e]))
 
-        day_timeslot_threhsolds =
-            [length(I.L[d]) - I.τ_lun - sum(!I.α[e, l] for l in I.L[d]) for d = 1:I.n_d]
-        sort!(day_timeslot_threhsolds)
+        day_timeslot_threhsolds = [sum(I.α[e, l] for l in I.L[d]) for d = 1:I.n_d]
+        sort!(day_timeslot_threhsolds, rev = true)
         for d = 2:I.n_d
             day_timeslot_threhsolds[d] += day_timeslot_threhsolds[d-1]
         end
@@ -708,7 +713,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
             end
         end
         mean_unwanted_breaks_min =
-            sum(unwanted_breaks) / sum(has_exam) * Int(I.Δ_l / Minute(1))
+            sum(unwanted_breaks) / sum(has_exam) * Int(round(I.Δ_l / Minute(1)))
         detailed_soft_constraints["mean_examiner_unwanted_breaks"] =
             Hour(div(mean_unwanted_breaks_min, 60)) +
             Minute(ceil(mean_unwanted_breaks_min % 60))
