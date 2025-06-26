@@ -384,7 +384,7 @@ function is_solution_feasible(I::Instance, x::Array{Bool,4})
 
     # Room switch break
     let
-        M(s) = ceil((I.μ[s] + I.τ_room + 1) / I.ν[s])
+        M(s) = ceil((I.μ[s] + I.τ_room) / I.ν[s])
 
         for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d], m = 1:I.n_m
             LHS =

@@ -11,25 +11,22 @@ include(repo_path * "src/utils.jl")
 save_dir = repo_path * "solutions/RSD_split/"
 
 # Load the arguments given to the script
-instance_name = nothing
-n_splits = nothing
-time_limit_sec = nothing
-fill_rate = nothing
-save_debug = true
-save_solution = true
-if isempty(ARGS)
-    instance_name = "business_school"
-    n_splits = 2
-    time_limit_sec = 172
-    fill_rate = 0.9
-    save_debug = false
-    save_solution = false
-else
-    @assert length(ARGS) == 4 "Incorrect amount of arguments given"
-    instance_name = string(ARGS[1])
-    n_splits = parse(Int, ARGS[2])
-    time_limit_sec = parse(Int, ARGS[3])
-    fill_rate = parse(Float64, ARGS[4])
+year = "2023-2024"
+instance_type = "business_school"
+n_splits = 4
+time_limit_sec = 600
+fill_rate = 0.95
+save_debug = false
+save_solution = false
+if !isempty(ARGS)
+    @assert length(ARGS) == 5 "Incorrect amount of arguments given"
+    year = string(ARGS[1])
+    instance_type = string(ARGS[2])
+    n_splits = parse(Int, ARGS[3])
+    time_limit_sec = parse(Int, ARGS[4])
+    fill_rate = parse(Float64, ARGS[5])
+    save_debug = true
+    save_solution = true
 end
 
 # Print the message by adding dashes before and after
@@ -40,14 +37,11 @@ end
 
 # Read instance
 instance_path =
-    repo_path *
-    "datasets/2023-2024/json_instances/2023-2024_dataset_" *
-    instance_name *
-    ".json"
-instance = read_instance(instance_path)
+    repo_path * "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type).json"
+instance = read_instance(instance_path);
 
 # Perform basic preliminary infeasibility checks
-check_infeasible_basic(instance)
+check_infeasible_basic(instance; fill_rate)
 
 # Split the instance into multiple subinstances
 println_dash("Start solving instance splitting model")
@@ -55,18 +49,19 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
     n_splits;
     fill_rate = fill_rate,
-    time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec / 10),
-    n_max_tries = 3,
+    time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec * 0.5),
+    n_max_tries = 1,
+    print_pb_constraints = true,
 )
 
 
-# Solve the split instances
+# Solve the RSD_jl submodel for each split instance
 obj_evol = [
     Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
     split = 1:n_splits
 ]
 f_values = zeros(Bool, instance.n_j, instance.n_l)
-!isnothing(time_limit_sec) && (time_limit_one_split = time_limit_sec * 0.7 / (2 * n_splits))
+!isnothing(time_limit_sec) && (time_limit_one_split = time_limit_sec * 0.5 / n_splits)
 
 for (split_id, SplitI) in enumerate(split_instances)
     println_dash("Start solving RSD_jl_split submodel n°$split_id")
@@ -171,14 +166,10 @@ if save_solution
     println_dash("Start saving the solution")
     save_radical =
         "RSDsplit_" *
-        instance_name *
-        "_" *
-        string(n_splits) *
-        "splits_" *
-        (isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec") *
-        "TimeLimit_" *
-        string(fill_rate) *
-        "FillRate"
+        "$(year)$(instance_type)_" *
+        "$(n_splits)splits_" *
+        "$(isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec")TimeLimit_" *
+        "$(fill_rate)FillRate"
 
     draw_objective_graphs(
         save_dir * "graphs/graph_" * save_radical * ".png",

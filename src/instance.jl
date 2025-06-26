@@ -668,7 +668,7 @@ function create_split_instances(
     return split_instances
 end
 
-function find_problematic_exams(RSD_jl_split_warm::Model)
+function _find_problematic_exams(RSD_jl_split_warm::Model)
 
     # Change exam needed into a soft constraint
     valid_ij = axes(RSD_jl_split_warm[:exam_needed], 1)
@@ -727,7 +727,7 @@ function split_instance(
     =#
 
     @assert n_splits <= I.n_d "Can't have more splits than the number of days"
-    @assert 0 <= fill_rate <= 1 "The filling rate must be between 0 and 1"
+    @assert 0 < fill_rate <= 1 "The filling rate must be in (0, 1]"
 
     # Initialize some data
     days_split_size = zeros(Int, n_splits)
@@ -825,7 +825,7 @@ function split_instance(
                     flush(stdout)
                 end
 
-                pb_exams = find_problematic_exams(RSD_jl_split_warm)
+                pb_exams = _find_problematic_exams(RSD_jl_split_warm)
 
                 # Ban the problematic exams in the splitting in the splitting MILP
                 if try_id == n_max_tries
