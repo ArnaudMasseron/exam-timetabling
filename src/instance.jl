@@ -366,6 +366,7 @@ end
 
 function check_infeasible_basic(I::Instance; fill_rate = 1)
     #= Perform basic preliminary tests in order to see if an instance is infeasible or not =#
+    pb_constraints = Vector{String}()
 
     # Feasible amount of students for exams with multiple simultaneous students
     for j = 1:I.n_j
@@ -373,7 +374,13 @@ function check_infeasible_basic(I::Instance; fill_rate = 1)
         if I.η[s] > 1
             nb_students_group = sum(I.γ[:, j])
             nb_leftover_students = nb_students_group % I.η[s]
-            @assert nb_leftover_students == 0 "Group $j needs $(I.η[s] - nb_leftover_students) more students"
+
+            if nb_leftover_students == 0
+                push!(
+                    pb_constraints,
+                    "Group $j needs $(I.η[s] - nb_leftover_students) more students",
+                )
+            end
         end
     end
 
@@ -390,7 +397,12 @@ function check_infeasible_basic(I::Instance; fill_rate = 1)
 
         available_time = fill_rate * (I.n_l - sum(.!I.θ[i, :]))
 
-        @assert time_needed <= available_time "Not enough time to schedule all of student $(i)'s exams. Time needed : $time_needed, available time $available_time"
+        if time_needed <= available_time
+            push!(
+                pb_constraints,
+                "Not enough time to schedule all of student $(i)'s exams. Time needed : $time_needed, available time $available_time",
+            )
+        end
     end
 
     # Student enough days
@@ -398,7 +410,12 @@ function check_infeasible_basic(I::Instance; fill_rate = 1)
         nb_days_needed = sum(I.γ[i, :]) / I.ξ
         nb_days_available = sum(sum(I.θ[i, l] for l in I.L[d]) > 0 for d = 1:I.n_d)
 
-        @assert nb_days_needed <= nb_days_available "Not enough days to schedule all of student $(i)'s exams. Days needed : $nb_days_needed, available days : $nb_days_available"
+        if nb_days_needed <= nb_days_available
+            push!(
+                pb_constraints,
+                "Not enough days to schedule all of student $(i)'s exams. Days needed : $nb_days_needed, available days : $nb_days_available",
+            )
+        end
     end
 
     # Examiner enough time or days
@@ -419,218 +436,77 @@ function check_infeasible_basic(I::Instance; fill_rate = 1)
         available_time = fill_rate * (I.n_l - sum(.!I.α[e, :]))
         days_needed = max(ceil(time_needed / available_time), ceil(nb_exams / I.ζ[e]))
 
-        @assert time_needed <= available_time "Not enough time to schedule all of examiner $(e)'s exams. Time needed : $time_needed, filling rate * available time : $available_time"
-        @assert days_needed <= I.κ[e] "Not enough days to schedule all of examiner $(e)'s exams. Days needed : $days_needed, available days : $(I.κ[e])"
-    end
-end
-
-function declare_splitting_MILP(
-    I::Instance,
-    n_splits::Int,
-    fill_rate::Float64,
-    exams::Vector{Tuple{Int,Int}},
-    days_split::Vector{UnitRange{Int}},
-    model::Model,
-)
-    # --- Main decision variables --- #
-    @variable(model, y[exam in exams, d = 1:I.n_d], binary = true)
-
-    # --- Constraints --- #
-    # Exam needed
-    @constraint(model, exam_needed[exam in exams], sum(y[exam, d] for d = 1:I.n_d) == 1)
-
-    # Group enough time
-    @variable(model, t[e = 1:I.n_e, P in I.U[e]], binary = true)
-    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-
-        function helper_group_available_time(j, d)
-            # Count the timeslots were exams can be scheduled
-            s = I.groups[j].s
-            group_alpha = [prod(I.α[e, l] for e in I.groups[j].e) for l in I.L[d]]
-            group_nb_timeslots_avail = 0
-            prev_l_loc = nothing
-            for (l_loc, val) in enumerate(group_alpha)
-                if isnothing(prev_l_loc) && val
-                    prev_l_loc = l_loc
-                elseif !isnothing(prev_l_loc) && !val
-                    time_in_bloc = l_loc - prev_l_loc + I.τ_seq
-                    group_nb_timeslots_avail +=
-                        time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
-                    prev_l_loc = l_loc - 1
-                end
-            end
-            if !isnothing(prev_l_loc)
-                time_in_bloc = length(I.L[d]) + 1 - prev_l_loc + I.τ_seq
-                group_nb_timeslots_avail +=
-                    time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
-            end
-
-            return fill_rate * group_nb_timeslots_avail
-        end
-
-        @constraint(
-            model,
-            group_enough_time[j = 1:I.n_j, d = 1:I.n_d],
-            sum(
-                y[exam, d] * exam_length(I.groups[exam[2]].s) for
-                exam in exams if j == exam[2];
-                init = 0,
-            ) <= helper_group_available_time(j, d)
-        )
-    end
-
-    # Examiner enough time
-    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true) # j has an exam on d implies v[j, d] == 1
-    @constraint(
-        model,
-        group_has_exam[j = 1:I.n_j, d = 1:I.n_d],
-        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) <=
-        sum(I.γ[:, j]) * v[j, d]
-    )
-    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-        @constraint(
-            model,
-            examiner_enough_time[e = 1:I.n_e, d = 1:I.n_d],
-            sum(
-                y[exam, d] * exam_length(I.groups[exam[2]].s) for
-                exam in exams if I.λ[e, exam[2]];
-                init = 0,
-            ) + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
-            fill_rate * (
-                sum(I.α[e, l] for l in I.L[d]) + sum(
-                    prod(I.α[e, l] for l in P) * length(P) * (t[e, P] - 1) for P in I.U[e];
-                    init = 0,
-                )
+        if time_needed <= available_time
+            push!(
+                pb_constraints,
+                "Not enough time to schedule all of examiner $(e)'s exams Time needed : $time_needed, filling rate * available time : $available_time",
             )
-        )
+        end
+        if days_needed <= I.κ[e]
+            push!(
+                pb_constraints,
+                "Not enough days to schedule all of examiner $(e)'s exams. Days needed : $days_needed, available days : $(I.κ[e])",
+            )
+        end
     end
 
-    # Examiner max exams
-    @variable(model, z[e = 1:I.n_e, d = 1:I.n_d], binary = true)
-    @constraint(
-        model,
-        examiner_max_exams[e = 1:I.n_e, d = 1:I.n_d],
-        sum(
-            y[exam, d] / I.η[I.groups[exam[2]].s] for
-            exam in exams if e in I.groups[exam[2]].e;
-            init = 0,
-        ) <= I.ζ[e] * z[e, d]
-    )
+    # Group enough_time
+    for j = 1:I.n_j
+        s = I.groups[j].s
+        exam_length = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
 
-    # Examiner max days
-    @constraint(
-        model,
-        examiner_max_days[e = 1:I.n_e],
-        sum(z[e, d] for d = 1:I.n_d) <= I.κ[e]
-    )
+        # Compute the time needed for all of the exams
+        time_needed = sum(I.γ[:, j]) * exam_length
+
+        # Compute the available time
+        group_alpha = [prod(I.α[e, l] for e in I.groups[j].e) for l = 1:I.n_l]
+        group_nb_timeslots_avail = 0
+        prev_l = 0
+        for (l, val) in enumerate(group_alpha)
+            val && continue
+            time_in_bloc = l - prev_l - 1 + I.τ_seq
+            group_nb_timeslots_avail +=
+                time_in_bloc - (time_in_bloc % (exam_length * I.η[s]))
+            prev_l = l
+        end
+        time_in_bloc = I.n_l - prev_l + I.τ_seq
+        group_nb_timeslots_avail += time_in_bloc - (time_in_bloc % (exam_length * I.η[s]))
+
+        if time_needed <= group_nb_timeslots_avail
+            push!(
+                pb_constraints,
+                "Not enough time to schedule all of group $(j)'s exams. Time needed : $time_needed, filling rate * available time : $group_nb_timeslots_avail",
+            )
+        end
+    end
 
     # Rooms enough time
-    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
-        @constraint(
-            model,
-            rooms_enough_time[(room_type, dict) in I.room_type_data, d = 1:I.n_d],
-            sum(
-                y[exam, d] * exam_length(I.groups[exam[2]].s) for
-                exam in exams if I.groups[exam[2]].s in dict["subjects"];
-                init = 0,
-            ) <= fill_rate * sum(I.δ[m, l] for l in I.L[d], m in dict["rooms"])
+    for (room_type, dict) in I.room_type_data
+        exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+        time_needed = sum(
+            sum(I.γ[:, j]) * exam_length(I.groups[j].s) / I.η[I.groups[j].s] for
+            j = 1:I.n_j if I.groups[j].s in dict["subjects"]
         )
+        available_time = fill_rate * sum(I.δ[m, l] for l = 1:I.n_l, m in dict["rooms"])
+
+        if time_needed <= available_time
+            push!(
+                pb_constraints,
+                "Not enough time to schedule all the exams with type $(room_type). Time needed : $time_needed, filling rate * available time : $available_time",
+            )
+        end
     end
 
-    # Feasible amount of students each day for exams with multiple simultaneous students
-    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= 0, integer = true)
-    @constraint(
-        model,
-        group_feasible_amount_students[j = 1:I.n_j, d = 1:I.n_d],
-        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) ==
-        r[j, d] * I.η[I.groups[j].s]
-    )
-
-    # Student enough time
-    let exam_length(s) = I.ν[s] + I.μ[s] + I.τ_stu
-        @constraint(
-            model,
-            student_enough_time[i = 1:I.n_i, d = 1:I.n_d],
-            sum(
-                y[exam, d] * exam_length(I.groups[exam[2]].s) for
-                exam in exams if i == exam[1];
-                init = 0,
-            ) <= fill_rate * sum(I.θ[i, l] for l in I.L[d])
+    if isempty(pb_constraints)
+        println(pb_constraints)
+        error(
+            "The instance with the given filling rate is not feasible. The problematic constraints have been printed.",
         )
     end
-
-    # Student max exams
-    @constraint(
-        model,
-        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
-        sum(y[exam, d] for exam in exams if exam[1] == i; init = 0) <= I.ξ
-    )
-
-    # Exam_availability
-    @constraint(
-        model,
-        exam_availability[exam in exams, d = 1:I.n_d],
-        sum(1 - z[e, d] for e in I.groups[exam[2]].e) +
-        (sum(I.θ[exam[1], l] for l in I.L[d]) == 0) <=
-        (length(I.groups[exam[2]].e) + 1) * (1 - y[exam, d])
-    )
-
-    # Harmonious exam distribution between splits
-    @variable(model, p[split in 1:n_splits] >= 0)
-    @constraint(
-        model,
-        split_harmonious_exams_1[split = 1:n_splits],
-        p[split] >=
-        sum(y[exam, d] for exam in exams, d in days_split[split]) -
-        length(exams) * length(days_split[split]) / I.n_d
-    )
-    @constraint(
-        model,
-        split_harmonious_exams_2[split = 1:n_splits],
-        p[split] >=
-        length(exams) * length(days_split[split]) / I.n_d -
-        sum(y[exam, d] for exam in exams, d in days_split[split])
-    )
-
-    # Student harmonious exams
-    @variable(model, q[i = 1:I.n_i, split = 1:n_splits])
-    @constraint(
-        model,
-        student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
-        q[i, split] >=
-        sum(
-            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
-            init = 0,
-        ) - I.ε[i] * length(days_split[split]) / I.n_d
-    )
-    @constraint(
-        model,
-        student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
-        q[i, split] >=
-        I.ε[i] * length(days_split[split]) / I.n_d - sum(
-            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
-            init = 0,
-        )
-    )
-
-
-    # --- Objective --- #
-    is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
-    z_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
-    p_coef = 30 / length(exams)
-    q_coef = 30 / sum(I.ε)
-    t_coef = 80 / sum(length(P) for e = 1:I.n_e for P in I.U[e])
-    !isfinite(t_coef) && (t_coef = 0)
-
-    objective =
-        z_coef * sum(is_expert(e) * sum(z[e, :]) for e = 1:I.n_e) +
-        p_coef * sum(p) +
-        q_coef * sum(q) +
-        t_coef * sum(t)
-    @objective(model, Min, objective)
 end
 
-function create_split_instances(
+function _create_split_instances(
     I::Instance,
     exams::Vector{Tuple{Int,Int}},
     days_split::Vector{UnitRange{Int}},
@@ -802,7 +678,7 @@ function split_instance(
         y_values = value.(model[:y])
         z_values = value.(model[:z])
         @assert prod(sum(y_values[:, d]) > 0 for d = 1:I.n_d)
-        split_instances = create_split_instances(I, exams, days_split, y_values, z_values)
+        split_instances = _create_split_instances(I, exams, days_split, y_values, z_values)
 
         # Check if the splits instances are feasible by warmstarting the different splits
         g_values_warmstart = zeros(Bool, I.n_i, I.n_j, I.n_l)

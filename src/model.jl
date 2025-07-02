@@ -202,37 +202,37 @@ function declare_CM(I::Instance, model::Model)
             ) for j = 1:I.n_j
         ]
 
-    @constraint(
-        model,
+        @constraint(
+            model,
             group_switch_break[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
-        sum(
+            sum(
                 x[i, k, l+t, m] / I.η[I.groups[k].s] for k = 1:I.n_j if k != j && I.σ[j, k]
                 for i = 1:I.n_i if I.γ[i, k] for t =
                     0:min(
                         I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
                         I.L[d][end] - l,
                     ) for m = 1:I.n_m;
-            init = 0,
+                init = 0,
             ) <=
             M[j] * (
                 1 -
                 sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, k] for m = 1:I.n_m) /
                 I.η[I.groups[j].s]
-    )
+            )
         )
     end
 
     # Examiner max days 1
     @variable(model, v[e = 1:I.n_e, d = 1:I.n_d], binary = true)
-        @constraint(
-            model,
+    @constraint(
+        model,
         examiner_max_days_1_and_max_exams[e = 1:I.n_e, d = 1:I.n_d],
-            sum(
-                x[i, j, l, m] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i if I.γ[i, j] for
-                l in I.L[d], m = 1:I.n_m;
-                init = 0,
+        sum(
+            x[i, j, l, m] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i if I.γ[i, j] for
+            l in I.L[d], m = 1:I.n_m;
+            init = 0,
         ) <= I.ζ[e] * v[e, d]
-        )
+    )
 
     # Examiner max days 2 and 3
     @variable(model, w[e = 1:I.n_e] >= 0)
@@ -388,14 +388,14 @@ function declare_CM(I::Instance, model::Model)
     # Exam continuity 1
     @variable(model, z_tilde[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m], binary = true)
     let M(j) = I.ρ[I.groups[j].s]
-    @constraint(
-        model,
+        @constraint(
+            model,
             exam_continuity_1_1[
-            j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
-            m = 1:I.n_m,
-        ],
+                j in 1:I.n_j,
+                d = 1:I.n_d,
+                l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+                m = 1:I.n_m,
+            ],
             I.ρ[I.groups[j].s] - sum(
                 x[i, j, l-t, m] for i = 1:I.n_i if I.γ[i, j] for
                 t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s]);
@@ -617,7 +617,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     let
         M = [
             sum(
-                        ceil(
+                ceil(
                     (I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s] + 1) /
                     I.ν[I.groups[k].s],
                 ) for k = 1:I.n_j if k != j && I.σ[j, k];
@@ -1060,7 +1060,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     let
         M = [
             sum(
-                        ceil(
+                ceil(
                     (I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s] + 1) /
                     I.ν[I.groups[k].s],
                 ) for k in valid_j if k != j && I.σ[j, k];
@@ -1657,4 +1657,200 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student availability
 
     @objective(model, Min, y_coef * sum(y))
+end
+
+# --- SPLIT model --- #
+function declare_splitting_MILP(
+    I::Instance,
+    n_splits::Int,
+    fill_rate::Float64,
+    exams::Vector{Tuple{Int,Int}},
+    days_split::Vector{UnitRange{Int}},
+    model::Model,
+)
+    # --- Main decision variables --- #
+    @variable(model, y[exam in exams, d = 1:I.n_d], binary = true)
+
+    # --- Constraints --- #
+    # Exam needed
+    @constraint(model, exam_needed[exam in exams], sum(y[exam, d] for d = 1:I.n_d) == 1)
+
+    # Group enough time
+    @variable(model, t[e = 1:I.n_e, P in I.U[e]], binary = true)
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+
+        function helper_group_available_time(j, d)
+            # Count the timeslots were exams can be scheduled
+            s = I.groups[j].s
+            group_alpha = [prod(I.α[e, l] for e in I.groups[j].e) for l in I.L[d]]
+            group_nb_timeslots_avail = 0
+            prev_l_loc = 0
+            for (l_loc, val) in enumerate(group_alpha)
+                val && continue
+                time_in_bloc = l_loc - prev_l_loc - 1 + I.τ_seq
+                group_nb_timeslots_avail +=
+                    time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
+                prev_l_loc = l_loc
+
+            end
+            time_in_bloc = length(I.L[d]) - prev_l_loc + I.τ_seq
+            group_nb_timeslots_avail +=
+                time_in_bloc - (time_in_bloc % (exam_length(s) * I.η[s]))
+
+            return fill_rate * group_nb_timeslots_avail
+        end
+
+        @constraint(
+            model,
+            group_enough_time[j = 1:I.n_j, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if j == exam[2];
+                init = 0,
+            ) <= helper_group_available_time(j, d)
+        )
+    end
+
+    # Examiner enough time
+    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true) # j has an exam on d implies v[j, d] == 1
+    @constraint(
+        model,
+        group_has_exam[j = 1:I.n_j, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) <=
+        sum(I.γ[:, j]) * v[j, d]
+    )
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+        @constraint(
+            model,
+            examiner_enough_time[e = 1:I.n_e, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if I.λ[e, exam[2]];
+                init = 0,
+            ) + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
+            fill_rate * (
+                sum(I.α[e, l] for l in I.L[d]) + sum(
+                    prod(I.α[e, l] for l in P) *
+                    sum(I.L[d][1] <= l <= I.L[d][end] for l in P) *
+                    (t[e, P] - 1) for P in I.U[e];
+                    init = 0,
+                )
+            )
+        )
+    end
+
+    # Examiner max exams
+    @variable(model, z[e = 1:I.n_e, d = 1:I.n_d], binary = true)
+    @constraint(
+        model,
+        examiner_max_exams[e = 1:I.n_e, d = 1:I.n_d],
+        sum(
+            y[exam, d] / I.η[I.groups[exam[2]].s] for
+            exam in exams if e in I.groups[exam[2]].e;
+            init = 0,
+        ) <= I.ζ[e] * z[e, d]
+    )
+
+    # Examiner max days
+    @constraint(
+        model,
+        examiner_max_days[e = 1:I.n_e],
+        sum(z[e, d] for d = 1:I.n_d) <= I.κ[e]
+    )
+
+    # Rooms enough time
+    let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
+        @constraint(
+            model,
+            rooms_enough_time[(room_type, dict) in I.room_type_data, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if I.groups[exam[2]].s in dict["subjects"];
+                init = 0,
+            ) <= fill_rate * sum(I.δ[m, l] for l in I.L[d], m in dict["rooms"])
+        )
+    end
+
+    # Feasible amount of students each day for exams with multiple simultaneous students
+    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= 0, integer = true)
+    @constraint(
+        model,
+        group_feasible_amount_students[j = 1:I.n_j, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) ==
+        r[j, d] * I.η[I.groups[j].s]
+    )
+
+    # Student enough time
+    let exam_length(s) = I.ν[s] + I.μ[s] + I.τ_stu
+        @constraint(
+            model,
+            student_enough_time[i = 1:I.n_i, d = 1:I.n_d],
+            sum(
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for
+                exam in exams if i == exam[1];
+                init = 0,
+            ) <= fill_rate * sum(I.θ[i, l] for l in I.L[d])
+        )
+    end
+
+    # Student max exams
+    @constraint(
+        model,
+        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        sum(y[exam, d] for exam in exams if exam[1] == i; init = 0) <= I.ξ
+    )
+
+    # Harmonious exam distribution between splits
+    @variable(model, p[split in 1:n_splits] >= 0)
+    @constraint(
+        model,
+        split_harmonious_exams_1[split = 1:n_splits],
+        p[split] >=
+        sum(y[exam, d] for exam in exams, d in days_split[split]) -
+        length(exams) * length(days_split[split]) / I.n_d
+    )
+    @constraint(
+        model,
+        split_harmonious_exams_2[split = 1:n_splits],
+        p[split] >=
+        length(exams) * length(days_split[split]) / I.n_d -
+        sum(y[exam, d] for exam in exams, d in days_split[split])
+    )
+
+    # Student harmonious exams
+    @variable(model, q[i = 1:I.n_i, split = 1:n_splits])
+    @constraint(
+        model,
+        student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
+        q[i, split] >=
+        sum(
+            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
+            init = 0,
+        ) - ceil(I.ε[i] * length(days_split[split]) / I.n_d)
+    )
+    @constraint(
+        model,
+        student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
+        q[i, split] >=
+        floor(I.ε[i] * length(days_split[split]) / I.n_d) - sum(
+            y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
+            init = 0,
+        )
+    )
+
+
+    # --- Objective --- #
+    is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
+    z_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
+    p_coef = 30 / length(exams)
+    q_coef = 30 / sum(I.ε)
+    t_coef = 80 / sum(length(P) for e = 1:I.n_e for P in I.U[e])
+    !isfinite(t_coef) && (t_coef = 0)
+
+    objective =
+        z_coef * sum(is_expert(e) * sum(z[e, :]) for e = 1:I.n_e) +
+        p_coef * sum(p) +
+        q_coef * sum(q) +
+        t_coef * sum(t)
+    @objective(model, Min, objective)
 end

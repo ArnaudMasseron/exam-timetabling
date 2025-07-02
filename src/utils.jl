@@ -1,3 +1,9 @@
+# Print the message by adding dashes before and after
+function println_dash(mystring::String)
+    println(repeat("-", 30) * " " * mystring * " " * repeat("-", 30))
+    flush(stdout)
+end
+
 function print_constraint_conflicts(model::Model, name_only::Bool = false)
     compute_conflict!(model)  # Compute IIS
 
@@ -23,21 +29,21 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
     that have the same group) so that students from the same class are next to one another 
     =#
 
-    for j = 1:I.n_j, m = 1:I.n_m, l = 1:I.n_l
+    for j = 1:I.n_j, m = 1:I.n_m, d = 1:I.n_d, l in I.L[d]
+        s = I.groups[j].s
+        !I.dataset["subjects"][s]["group_students_by_class"] && continue
+
         if sum(x_values[i, j, l, m] for i = 1:I.n_i) > 0
-            s = I.groups[j].s
-            !I.dataset["subjects"][s]["group_students_by_class"] && continue
 
             # Find the students in the current exam series
             students_in_serie = []
             let curr_l = l
                 while true
-                    @assert curr_l <= I.n_l
+                    curr_l > I.L[d][end] && break
 
                     students_l = findall(identity, x_values[:, j, curr_l, m])
-                    if isempty(students_l)
-                        break
-                    end
+                    isempty(students_l) && break
+
                     @assert length(students_l) == I.η[s]
 
                     for i in students_l
@@ -66,7 +72,7 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
                 end
             end
 
-            # Reorder the students by theur class position
+            # Reorder the students by their class position
             sort(students_in_serie, by = (i -> student_to_class_position[i]))
 
             # Change x_values

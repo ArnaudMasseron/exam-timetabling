@@ -29,12 +29,6 @@ if !isempty(ARGS)
     save_solution = true
 end
 
-# Print the message by adding dashes before and after
-function println_dash(mystring::String)
-    println(repeat("-", 30) * " " * mystring * " " * repeat("-", 30))
-    flush(stdout)
-end
-
 # Read instance
 instance_path =
     repo_path * "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type).json"
@@ -53,7 +47,6 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     n_max_tries = 1,
     print_pb_constraints = true,
 )
-
 
 # Solve the RSD_jl submodel for each split instance
 obj_evol = [
@@ -100,7 +93,7 @@ if save_debug
 end
 
 
-# Add the rooms
+# Add the rooms, i.e. solve RSD_jlm
 b_values = zeros(Bool, instance.n_j, instance.n_l, instance.n_m)
 let
     global b_values
@@ -126,7 +119,7 @@ if save_debug
 end
 
 
-# Add the students
+# Add the students, i.e. solve RSD_ijlm
 x_values = zeros(Bool, instance.n_i, instance.n_j, instance.n_l, instance.n_m)
 let
     global x_values
@@ -156,7 +149,6 @@ end
 if save_debug
     @save save_dir * "debug/x_values.jld2" x_values
 end
-
 
 # Reorder the students inside exam series according to their classes
 reorder_students_inside_series(instance, x_values)
