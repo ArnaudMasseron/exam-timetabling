@@ -1,0 +1,228 @@
+{
+  "rooms": [
+    {
+      "unavailabilities": [
+        [
+          "2025-06-09T08:00:00",
+          "2025-06-09T20:00:00"
+        ],
+        [
+          "2025-06-10T08:00:00",
+          "2025-06-13T14:30:00"
+        ]
+      ],
+      "type": "DEF",
+      "acronym": "310"
+    },
+        {
+      "unavailabilities": [],
+      "type": "DEF",
+      "acronym": "314"
+    },
+    {
+      "unavailabilities": [],
+      "type": "INF",
+      "acronym": "202"
+    }
+  ],
+  "groups": [
+    {
+      "subject_id": 1,
+      "examiner_ids": [
+        1,
+        2
+      ]
+    },
+    {
+      "subject_id": 3,
+      "examiner_ids": [
+        1,
+        3
+      ]
+    },
+    {
+      "subject_id": 2,
+      "examiner_ids": [
+        4,
+        2
+      ]
+    }
+  ],
+  "classes": [
+    {
+      "acronym": "A"
+    },
+    {
+      "acronym": "B"
+    }
+  ],
+  "subjects": [
+    {
+      "duration_time": 1,
+      "name": "Computer science",
+      "max_number_exams_row": 6,
+      "group_students_by_class": true,
+      "preparation_time": 1,
+      "room_type": "INF",
+      "number_of_students": 1
+    },
+    {
+      "duration_time": 2,
+      "name": "History",
+      "max_number_exams_row": 3,
+      "group_students_by_class": true,
+      "preparation_time": 3,
+      "room_type": "DEF",
+      "number_of_students": 2
+    },
+    {
+      "duration_time": 1,
+      "name": "Math",
+      "max_number_exams_row": 6,
+      "group_students_by_class": false,
+      "preparation_time": 1,
+      "room_type": "DEF",
+      "number_of_students": 1
+    }
+  ],
+  "examiners": [
+    {
+      "name": "Examiner 1",
+      "hard_unavailabilities": [
+        [
+          "2025-06-09T08:00:00",
+          "2025-06-09T20:00:00"
+        ],
+        [
+          "2025-06-19T08:00:00",
+          "2025-06-19T20:00:00"
+        ]
+      ],
+      "max_number_days": 4,
+      "soft_unavailabilities": [],
+      "type": "teacher",
+      "max_number_exams_per_day": 10,
+      "acronym": "EXA1"
+    },
+    {
+      "name": "Examiner 2",
+      "hard_unavailabilities": [],
+      "max_number_days": 4,
+      "soft_unavailabilities": [
+        [
+          "2025-06-21T08:00:00",
+          "2025-06-21T20:00:00"
+        ],
+        [
+          "2025-06-18T08:00:00",
+          "2025-06-18T20:00:00"
+        ]
+      ],
+      "type": "expert",
+      "max_number_exams_per_day": 24,
+      "acronym": "EXA2"
+    },
+    {
+      "name": "Examiner 3",
+      "hard_unavailabilities": [],
+      "max_number_days": 4,
+      "soft_unavailabilities": [],
+      "type": "expert",
+      "max_number_exams_per_day": 24,
+      "acronym": "EXA3"
+    },
+    {
+      "name": "Examiner 4",
+      "hard_unavailabilities": [],
+      "max_number_days": 6,
+      "soft_unavailabilities": [],
+      "type": "teacher",
+      "max_number_exams_per_day": 14,
+      "acronym": "EXA4"
+    }
+  ],
+  "exams": [
+    {
+      "modality": "1603807419",
+      "group_id": 3,
+      "student_id": 1
+    },
+    {
+      "modality": "1603818012",
+      "group_id": 3,
+      "student_id": 3
+    },
+    {
+      "modality": "1603807047",
+      "group_id": 1,
+      "student_id": 1
+    },
+    {
+      "modality": "1603761364",
+      "group_id": 2,
+      "student_id" : 2
+    },
+    {
+      "modality": "1603778697",
+      "group_id": 2,
+      "student_id": 3
+    }
+  ],
+  "general_parameters": {
+    "exam_sequence_break_duration": 2,
+    "student_break_duration": 4,
+    "room_break_duration": 2,
+    "time_slot_length_minutes": 15,
+    "max_number_exams_student": 1,
+    "group_switch_break_duration": 2,
+    "exam_time_windows": [
+      [
+        "2025-06-10T08:00:00",
+        "2025-06-10T19:00:00"
+      ],
+      [
+        "2025-06-11T08:00:00",
+        "2025-06-11T19:00:00"
+      ],
+      [
+        "2025-06-12T08:00:00",
+        "2025-06-12T19:00:00"
+      ],
+      [
+        "2025-06-13T08:00:00",
+        "2025-06-13T19:00:00"
+      ]
+    ],
+    "lunch_time_window": [
+      "11:30:00",
+      "13:15:00"
+    ],
+    "lunch_break_duration": 3
+  },
+  "students": [
+    {
+      "name": "Student 1",
+      "unavailabilities": [
+        [
+          "2025-06-16T08:00:00",
+          "2025-06-17T20:00:00"
+        ],
+        [
+          "2025-06-09T09:00:00",
+          "2025-06-09T11:30:00"
+        ]
+      ],
+      "class_id": 1
+    },
+    {
+      "name": "Student 2",
+      "unavailabilities": [],
+      "class_id": 2
+    },
+    {
+      "name": "Student 3",
+      "unavailabilities": [],
+      "class_id": 1
+    }
+  ]
+}
