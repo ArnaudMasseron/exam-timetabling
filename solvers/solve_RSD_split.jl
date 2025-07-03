@@ -15,7 +15,7 @@ year = "2023-2024"
 instance_type = "business_school"
 n_splits = 4
 time_limit_sec = 600
-fill_rate = 0.95
+fill_rate = 0.9
 save_debug = false
 save_solution = false
 if !isempty(ARGS)
@@ -38,18 +38,24 @@ instance = read_instance(instance_path);
 check_infeasible_basic(instance; fill_rate)
 
 # Split the instance into multiple subinstances
+n_max_tries = 1
+SPLIT_obj_evol = [
+    Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
+    try_id = 1:n_max_tries
+]
 println_dash("Start solving instance splitting model")
 split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
-    n_splits;
+    n_splits,
+    SPLIT_obj_evol;
     fill_rate = fill_rate,
     time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec * 0.5),
-    n_max_tries = 1,
+    n_max_tries = n_max_tries,
     print_pb_constraints = true,
 )
 
 # Solve the RSD_jl submodel for each split instance
-obj_evol = [
+RSD_jl_obj_evol = [
     Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
     split = 1:n_splits
 ]
@@ -72,12 +78,20 @@ for (split_id, SplitI) in enumerate(split_instances)
         set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_one_split)
 
     # Set objective value fetching callback function
-    callback_f = get_objective_value_callback(split_id, obj_evol)
+    callback_f = get_objective_value_callback(split_id, RSD_jl_obj_evol)
     MOI.set(RSD_jl_split, Gurobi.CallbackFunction(), callback_f)
 
     # Solve the model
     optimize!(RSD_jl_split)
     @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+
+    if termination_status(RSD_jl_split) != MOI.OPTIMAL
+        push!(RSD_jl_obj_evol[split_id]["time"], time_limit_one_split)
+        push!(
+            RSD_jl_obj_evol[split_id]["objective"],
+            RSD_jl_obj_evol[split_id]["objective"][end],
+        )
+    end
 
     # Get the values of the variable f
     curr_f_values = value.(RSD_jl_split[:f])
@@ -89,7 +103,7 @@ for (split_id, SplitI) in enumerate(split_instances)
 end
 if save_debug
     @save save_dir * "debug/f_values.jld2" f_values
-    @save save_dir * "debug/obj_evol.jld2" obj_evol
+    @save save_dir * "debug/RSD_jl_obj_evol.jld2" RSD_jl_obj_evol
 end
 
 
@@ -153,6 +167,9 @@ end
 # Reorder the students inside exam series according to their classes
 reorder_students_inside_series(instance, x_values)
 
+# Compute the cost of the solution
+sol_cost = solution_cost(instance, x_values; compute_unwanted_breaks = true)
+
 # Save the solution
 if save_solution
     println_dash("Start saving the solution")
@@ -163,16 +180,26 @@ if save_solution
         "$(isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec")TimeLimit_" *
         "$(fill_rate)FillRate"
 
-    draw_objective_graphs(
-        save_dir * "graphs/graph_" * save_radical * ".png",
-        obj_evol,
+    @save save_dir * "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2" RSD_jl_obj_evol
+    draw_RSD_jl_objective_graphs(
+        save_dir * "graphs/graph_RSD_jl_" * save_radical * ".png",
+        RSD_jl_obj_evol,
         time_limit_one_split,
     )
+
+    @save save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
+    draw_SPLIT_objective_graph(
+        save_dir * "graphs/graph_SPLIT_" * save_radical * ".png",
+        SPLIT_obj_evol,
+        time_limit_one_split,
+    )
+
     @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(
         instance,
         x_values,
         completely_removed_exams,
+        sol_cost,
         save_dir * "json/sol_" * save_radical * ".json",
     )
     println_dash("Solution saved")

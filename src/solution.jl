@@ -4,6 +4,7 @@ function write_solution_json(
     I::Instance,
     x_values::Array{Bool,4},
     unscheduled_exams_ids::Set{Tuple{Int,Int}},
+    sol_cost::Tuple{Float64,Vector{Float64},Dict{String,Any}},
     solution_path::String,
 )
     @assert endswith(solution_path, ".json")
@@ -88,6 +89,11 @@ function write_solution_json(
 
     solution["exams"] = exams
     solution["unscheduled_exams"] = unscheduled_exams
+    solution["cost"] = Dict{String,Any}(
+        "total_cost" => sol_cost[1],
+        "soft_constraints_costs" => sol_cost[2],
+        "interpretable_KPIs" => sol_cost[3],
+    )
 
     # Save exams in a json file
     open(solution_path, "w") do file
@@ -722,27 +728,60 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
     return objective, detailed_objective, detailed_soft_constraints
 end
 
-function draw_objective_graphs(
+function draw_RSD_jl_objective_graphs(
     fig_path::String,
-    objective_evolution::Vector{Dict{String,Vector{Float64}}},
+    obj_evol::Vector{Dict{String,Vector{Float64}}},
     time_limit::Float64,
 )
     @assert endswith(fig_path, ".png")
-    n_splits = length(objective_evolution)
+    n_splits = length(obj_evol)
 
+    time = obj_evol[1]["time"]
+    objective = obj_evol[1]["objective"]
     plot(
-        [],
-        [],
+        time,
+        objective,
         xlims = (0, time_limit),
         title = "Best RSD_jl objective vs Time",
         xlabel = "Time (seconds)",
         ylabel = "Best objective",
+        label = "split n°1",
+        linetype = :steppost,
     )
-
-    for split = 1:n_splits
-        time = objective_evolution[split]["time"]
-        objective = objective_evolution[split]["objective"]
+    for split = 2:n_splits
+        time = obj_evol[split]["time"]
+        objective = obj_evol[split]["objective"]
         plot!(time, objective, label = "split n°$split", linetype = :steppost)
+    end
+
+    plot!(legend = :topright)
+    savefig(fig_path)
+end
+
+function draw_SPLIT_objective_graph(
+    fig_path::String,
+    obj_evol::Vector{Dict{String,Vector{Float64}}},
+    time_limit::Float64,
+)
+    @assert endswith(fig_path, ".png")
+    n_tries = length(obj_evol)
+
+    time = obj_evol[1]["time"]
+    objective = obj_evol[1]["objective"]
+    plot(
+        time,
+        objective,
+        xlims = (0, time_limit),
+        title = "Best SPLIT objective vs Time",
+        xlabel = "Time (seconds)",
+        ylabel = "Best objective",
+        label = "try n°1",
+        linetype = :steppost,
+    )
+    for try_id = 2:n_tries
+        time = obj_evol[try_id]["time"]
+        objective = obj_evol[try_id]["objective"]
+        plot!(time, objective, label = "try n°$try_id", linetype = :steppost)
     end
 
     plot!(legend = :topright)

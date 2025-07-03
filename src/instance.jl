@@ -186,11 +186,6 @@ function read_instance(path::String)
     α = ones(Bool, n_e, n_l)
     β = ones(Bool, n_e, n_l)
     U = Vector{Set{Vector{Int}}}([Set{Vector{Int}}() for e = 1:n_e])
-    @assert issorted(dataset["general_parameters"]["exam_time_windows"])
-    exam_days = ([
-        Date(DateTime(start_datetime_str)) for
-        (start_datetime_str, _) in dataset["general_parameters"]["exam_time_windows"]
-    ])
     for (e, dict) in enumerate(dataset["examiners"])
         ζ[e] = dict["max_number_exams_per_day"]
         κ[e] = dict["max_number_days"]
@@ -579,7 +574,8 @@ end
 include(String(@__DIR__) * "/../src/utils.jl")
 function split_instance(
     I::Instance,
-    n_splits::Int;
+    n_splits::Int,
+    SPLIT_obj_evol::Vector{Dict{String,Vector{Float64}}};
     fill_rate = 0.9,
     time_limit_sec = nothing,
     n_max_tries = 5,
@@ -660,8 +656,20 @@ function split_instance(
             @objective(model, Min, objective_splitting_MILP)
         end
 
+        # Set objective value fetching callback function
+        callback_f = get_objective_value_callback(try_id, SPLIT_obj_evol)
+        MOI.set(model, Gurobi.CallbackFunction(), callback_f)
+
         # Solve the MILP splitting problem
         optimize!(model)
+
+        if termination_status(model) != MOI.OPTIMAL
+            push!(SPLIT_obj_evol[try_id]["time"], time_limit_sec)
+            push!(
+                SPLIT_obj_evol[try_id]["objective"],
+                SPLIT_obj_evol[try_id]["objective"][end],
+            )
+        end
 
         # If the model is infeasible the print the problematic constraints
         if !has_values(model)
@@ -677,7 +685,6 @@ function split_instance(
         # Read the results
         y_values = value.(model[:y])
         z_values = value.(model[:z])
-        @assert prod(sum(y_values[:, d]) > 0 for d = 1:I.n_d)
         split_instances = _create_split_instances(I, exams, days_split, y_values, z_values)
 
         # Check if the splits instances are feasible by warmstarting the different splits
