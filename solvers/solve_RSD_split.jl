@@ -8,14 +8,12 @@ include(repo_path * "src/model.jl")
 include(repo_path * "src/solution.jl")
 include(repo_path * "src/utils.jl")
 
-save_dir = repo_path * "solutions/RSD_split/"
-
 # Load the arguments given to the script
 year = "2023-2024"
 instance_type = "business_school"
 n_splits = 4
-time_limit_sec = 600
-fill_rate = 0.9
+time_limit_sec = 60
+fill_rate = 0.95
 save_debug = false
 save_solution = false
 if !isempty(ARGS)
@@ -29,6 +27,15 @@ if !isempty(ARGS)
     save_solution = true
 end
 
+# Set solution saving parameters
+save_dir = repo_path * "solutions/RSD_split/"
+save_radical =
+    "RSDsplit_" *
+    "$(year)$(instance_type)_" *
+    "$(n_splits)splits_" *
+    "$(isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec")TimeLimit_" *
+    "$(fill_rate)FillRate"
+
 # Read instance
 instance_path =
     repo_path * "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type).json"
@@ -38,21 +45,31 @@ instance = read_instance(instance_path);
 check_infeasible_basic(instance; fill_rate)
 
 # Split the instance into multiple subinstances
-n_max_tries = 1
+n_max_tries = 3
 SPLIT_obj_evol = [
     Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
     try_id = 1:n_max_tries
 ]
+time_limit_one_split = (!isnothing(time_limit_sec) ? time_limit_sec / n_splits : nothing)
 println_dash("Start solving instance splitting model")
 split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
     n_splits,
     SPLIT_obj_evol;
     fill_rate = fill_rate,
-    time_limit_sec = (isnothing(time_limit_sec) ? nothing : time_limit_sec * 0.5),
-    n_max_tries = n_max_tries,
-    print_pb_constraints = true,
+    time_limit_warmstart = time_limit_one_split / 5,
 )
+if save_debug
+    @save save_dir * "debug/SPLIT_obj_evol.jld2" SPLIT_obj_evol
+end
+if save_solution
+    @save save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
+    draw_SPLIT_objective_graph(
+        save_dir * "graphs/graph_SPLIT_" * save_radical * ".png",
+        SPLIT_obj_evol,
+        nothing,
+    )
+end
 
 # Solve the RSD_jl submodel for each split instance
 RSD_jl_obj_evol = [
@@ -60,8 +77,6 @@ RSD_jl_obj_evol = [
     split = 1:n_splits
 ]
 f_values = zeros(Bool, instance.n_j, instance.n_l)
-!isnothing(time_limit_sec) && (time_limit_one_split = time_limit_sec * 0.5 / n_splits)
-
 for (split_id, SplitI) in enumerate(split_instances)
     println_dash("Start solving RSD_jl_split submodel n°$split_id")
     # Declare model
@@ -74,7 +89,7 @@ for (split_id, SplitI) in enumerate(split_instances)
     end
 
     # Set time limit
-    !isnothing(time_limit_sec) &&
+    !isnothing(time_limit_one_split) &&
         set_optimizer_attribute(RSD_jl_split, "TimeLimit", time_limit_one_split)
 
     # Set objective value fetching callback function
@@ -85,13 +100,11 @@ for (split_id, SplitI) in enumerate(split_instances)
     optimize!(RSD_jl_split)
     @assert termination_status(RSD_jl_split) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
 
-    if termination_status(RSD_jl_split) != MOI.OPTIMAL
-        push!(RSD_jl_obj_evol[split_id]["time"], time_limit_one_split)
-        push!(
-            RSD_jl_obj_evol[split_id]["objective"],
-            RSD_jl_obj_evol[split_id]["objective"][end],
-        )
-    end
+    push!(RSD_jl_obj_evol[split_id]["time"], JuMP.solve_time(RSD_jl_split))
+    push!(
+        RSD_jl_obj_evol[split_id]["objective"],
+        RSD_jl_obj_evol[split_id]["objective"][end],
+    )
 
     # Get the values of the variable f
     curr_f_values = value.(RSD_jl_split[:f])
@@ -105,7 +118,14 @@ if save_debug
     @save save_dir * "debug/f_values.jld2" f_values
     @save save_dir * "debug/RSD_jl_obj_evol.jld2" RSD_jl_obj_evol
 end
-
+if save_solution
+    @save save_dir * "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2" RSD_jl_obj_evol
+    draw_RSD_jl_objective_graphs(
+        save_dir * "graphs/graph_RSD_jl_" * save_radical * ".png",
+        RSD_jl_obj_evol,
+        time_limit_one_split,
+    )
+end
 
 # Add the rooms, i.e. solve RSD_jlm
 b_values = zeros(Bool, instance.n_j, instance.n_l, instance.n_m)
@@ -131,7 +151,6 @@ end
 if save_debug
     @save save_dir * "debug/b_values.jld2" b_values
 end
-
 
 # Add the students, i.e. solve RSD_ijlm
 x_values = zeros(Bool, instance.n_i, instance.n_j, instance.n_l, instance.n_m)
@@ -173,26 +192,6 @@ sol_cost = solution_cost(instance, x_values; compute_unwanted_breaks = true)
 # Save the solution
 if save_solution
     println_dash("Start saving the solution")
-    save_radical =
-        "RSDsplit_" *
-        "$(year)$(instance_type)_" *
-        "$(n_splits)splits_" *
-        "$(isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec")TimeLimit_" *
-        "$(fill_rate)FillRate"
-
-    @save save_dir * "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2" RSD_jl_obj_evol
-    draw_RSD_jl_objective_graphs(
-        save_dir * "graphs/graph_RSD_jl_" * save_radical * ".png",
-        RSD_jl_obj_evol,
-        time_limit_one_split,
-    )
-
-    @save save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
-    draw_SPLIT_objective_graph(
-        save_dir * "graphs/graph_SPLIT_" * save_radical * ".png",
-        SPLIT_obj_evol,
-        time_limit_one_split,
-    )
 
     @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(
@@ -202,5 +201,6 @@ if save_solution
         sol_cost,
         save_dir * "json/sol_" * save_radical * ".json",
     )
+
     println_dash("Solution saved")
 end

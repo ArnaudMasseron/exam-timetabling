@@ -46,7 +46,7 @@ Base.@kwdef struct Instance
 
     S_exa::Vector{Set{Int}}
     S_stu::Vector{Set{Int}}
-    U::Vector{Set{Vector{Int}}}
+    U::Vector{Set{UnitRange{Int}}}
     J::Vector{Set{Int}}
     L::Vector{Vector{Int}}
     V::Vector{Vector{Int}}
@@ -80,7 +80,7 @@ function read_instance(path::String)
 
     timeslots_start_datetime = Vector{DateTime}()
     for (start_datetime_str, end_datetime_str) in
-        dataset["general_parameters"]["exam_time_windows"]
+        sort(dataset["general_parameters"]["exam_time_windows"])
         start_datetime = DateTime(start_datetime_str)
         end_datetime = DateTime(end_datetime_str)
 
@@ -185,7 +185,7 @@ function read_instance(path::String)
     ζ = zeros(Int, n_e)
     α = ones(Bool, n_e, n_l)
     β = ones(Bool, n_e, n_l)
-    U = Vector{Set{Vector{Int}}}([Set{Vector{Int}}() for e = 1:n_e])
+    U = Vector{Set{UnitRange{Int}}}([Set{UnitRange{Int}}() for e = 1:n_e])
     for (e, dict) in enumerate(dataset["examiners"])
         ζ[e] = dict["max_number_exams_per_day"]
         κ[e] = dict["max_number_days"]
@@ -225,13 +225,13 @@ function read_instance(path::String)
                 (end_timeslot -= 1)
 
             if start_timeslot <= end_timeslot
-                obligation = Vector{Int}()
+                obligation = start_timeslot:end_timeslot
 
-                for l = start_timeslot:end_timeslot
-                    β[e, l] = false
-                    push!(obligation, l)
-                end
+                #= If the examiner isn't strongly available then the weak unavailability is considered
+                to be a result of bad data and doesn't exist =#
+                !prod(α[e, obligation]) && continue
 
+                β[e, obligation] .= false
                 push!(U[e], obligation)
             end
         end
@@ -576,9 +576,11 @@ function split_instance(
     I::Instance,
     n_splits::Int,
     SPLIT_obj_evol::Vector{Dict{String,Vector{Float64}}};
-    fill_rate = 0.9,
-    time_limit_sec = nothing,
-    n_max_tries = 5,
+    fill_rate = 0.95,
+    time_limit_warmstart = nothing,
+    time_limit_SPLIT = nothing,
+    mip_gap_SPLIT = 0.05,
+    n_max_tries = 1,
     print_pb_constraints = false,
 )
     #= 
@@ -620,8 +622,9 @@ function split_instance(
     # Declare the splitting model
     model = Model(Gurobi.Optimizer)
     declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, model)
-    !isnothing(time_limit_sec) &&
-        set_optimizer_attribute(model, "TimeLimit", time_limit_sec)
+    !isnothing(time_limit_SPLIT) &&
+        set_optimizer_attribute(model, "TimeLimit", time_limit_SPLIT)
+    !isnothing(mip_gap_SPLIT) && set_optimizer_attribute(model, "MIPGap", mip_gap_SPLIT)
 
     # Solve the splitting problem until a feasible split has been found
     feasible_splits_found = false
@@ -631,28 +634,22 @@ function split_instance(
     completely_removed_exams = Set{Tuple{Int,Int}}()
     try_id = 1
     while !feasible_splits_found && try_id <= n_max_tries
-        # Remove exams banned in all splits
-        if !isempty(completely_removed_exams)
-            remaining_exams = setdiff!(exams, completely_removed_exams)
-
-            # Actualise the exam one split constraint
-            delete(model, model[:exam_needed].data)
-            model[:exam_needed] = @constraint(
-                model,
-                [exam in remaining_exams],
-                sum(model[:y][exam, d] for d = 1:I.n_d) == 1
-            )
-
-            # Remove the exams from the instance
-            for exam in completely_removed_exams
-                I.γ[exam[1], exam[2]] = false
-            end
-        end
-
         # Warmstart
         let objective_splitting_MILP = objective_function(model)
             @objective(model, Min, 0)
             optimize!(model)
+
+            # If the model is infeasible the print the problematic constraints
+            if !has_values(model)
+                error_message = "Unable to split the instance.\nThis can be the result of a time limit that is too small, or a filling rate that is too low."
+                if termination_status(model) in
+                   [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] && print_pb_constraints
+                    error_message *= "\nThe problematic constraints have been printed."
+                    print_constraint_conflicts(model)
+                end
+                error(error_message)
+            end
+
             @objective(model, Min, objective_splitting_MILP)
         end
 
@@ -663,24 +660,8 @@ function split_instance(
         # Solve the MILP splitting problem
         optimize!(model)
 
-        if termination_status(model) != MOI.OPTIMAL
-            push!(SPLIT_obj_evol[try_id]["time"], time_limit_sec)
-            push!(
-                SPLIT_obj_evol[try_id]["objective"],
-                SPLIT_obj_evol[try_id]["objective"][end],
-            )
-        end
-
-        # If the model is infeasible the print the problematic constraints
-        if !has_values(model)
-            error_message = "Unable to split the instance.\nThis can be the result of a time limit that is too small, or a filling rate that is too low."
-            if termination_status(model) in [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] &&
-               print_pb_constraints
-                error_message *= "\nThe problematic constraints have been printed."
-                print_constraint_conflicts(model)
-            end
-            error(error_message)
-        end
+        push!(SPLIT_obj_evol[try_id]["time"], JuMP.solve_time(model))
+        push!(SPLIT_obj_evol[try_id]["objective"], SPLIT_obj_evol[try_id]["objective"][end])
 
         # Read the results
         y_values = value.(model[:y])
@@ -694,8 +675,11 @@ function split_instance(
             RSD_jl_split_warm = Model(Gurobi.Optimizer)
             declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
             @objective(RSD_jl_split_warm, Min, 0)
-            !isnothing(time_limit_sec) &&
-                set_optimizer_attribute(RSD_jl_split_warm, "TimeLimit", time_limit_sec)
+            !isnothing(time_limit_warmstart) && set_optimizer_attribute(
+                RSD_jl_split_warm,
+                "TimeLimit",
+                time_limit_warmstart,
+            )
             optimize!(RSD_jl_split_warm)
 
             # If the split is infeasible then find the exams that cause problem
@@ -715,10 +699,10 @@ function split_instance(
                     RSD_jl_split_warm = Model(Gurobi.Optimizer)
                     declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
                     @objective(RSD_jl_split_warm, Min, 0)
-                    !isnothing(time_limit_sec) && set_optimizer_attribute(
+                    !isnothing(time_limit_warmstart) && set_optimizer_attribute(
                         RSD_jl_split_warm,
                         "TimeLimit",
-                        time_limit_sec,
+                        time_limit_warmstart,
                     )
 
                     for exam in pb_exams
@@ -757,6 +741,24 @@ function split_instance(
             end
         end
 
+        # Remove completely removed exams
+        if !isempty(completely_removed_exams)
+            remaining_exams = setdiff!(exams, completely_removed_exams)
+
+            # Actualise the exam one split constraint
+            delete(model, model[:exam_needed].data)
+            model[:exam_needed] = @constraint(
+                model,
+                [exam in remaining_exams],
+                sum(model[:y][exam, d] for d = 1:I.n_d) == 1
+            )
+
+            # Remove the exams from the instance
+            for exam in completely_removed_exams
+                I.γ[exam[1], exam[2]] = false
+            end
+        end
+
         try_id += 1
     end
 
@@ -764,6 +766,8 @@ function split_instance(
         println_dash(
             "$(length(completely_removed_exams)) exams have been completely removed",
         )
+    else
+        println_dash("All exams were kept. None were removed from the instance.")
     end
 
     return split_instances, g_values_warmstart, completely_removed_exams

@@ -480,26 +480,25 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
     end
 
     # Group availability
-    q = zeros(Bool, I.n_e, I.n_l)
-    for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]
-        LHS = sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m; init = 0)
-        if LHS > 0
-            s = I.groups[j].s
-            for e in I.groups[j].e, t = max(I.L[d][1] - l, -I.μ[s]):I.ν[s]-1
-                if !I.β[e, l+t]
-                    q[e, l+t] = true
-                end
-            end
-        end
-    end
+    q = Vector{Dict{UnitRange{Int},Bool}}([
+        Dict{UnitRange{Int},Bool}(zip(I.U[e], zeros(Bool, length(I.U[e])))) for e = 1:I.n_e
+    ])
+    for j = 1:I.n_j, e in I.groups[j].e, P in I.U[e]
+        !prod(I.α[e, P]) && continue
+        s = I.groups[j].s
 
-    # Group one block cancelation
-    for e = 1:I.n_e, P in I.U[e]
-        one_q_true = sum(q[e, P[a]] for a = 1:lastindex(P)-1; init = 0) > 0
-        if one_q_true
-            for a = 1:lastindex(P)-1
-                q[e, P[a]] = true
-            end
+        days_begginings = [I.L[d][1] for d = 1:I.n_d]
+        @assert issorted(days_begginings)
+        get_t_range(l) = begin
+            d = searchsortedlast(days_begginings, l)
+            return max(-I.μ[s], l - I.L[d][end]):min(I.ν[s] - 1, l - I.L[d][1])
+        end
+
+        if sum(
+            x[i, j, l-t, m] for l in P for t in get_t_range(l), i = 1:I.n_i, m = 1:I.n_m;
+            init = 0,
+        ) > 0
+            q[e][P] = true
         end
     end
 
@@ -579,7 +578,8 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     detailed_objective = [
         y_coef * sum(y),
-        q_coef * sum(q),
+        q_coef *
+        sum(is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e]),
         w_coef * sum(is_expert(e) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
@@ -592,15 +592,43 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     detailed_soft_constraints["nb_non_harmonious_students"] = sum(y .> 0)
 
-    classes_canceled_min = convert(Minute, sum(q) * I.Δ_l).value
-    detailed_soft_constraints["nb_hours_cancelled"] =
-        Hour(div(classes_canceled_min, 60)) + Minute(ceil(classes_canceled_min % 60))
+    classes_canceled_timeslots =
+        sum(is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e])
+    classes_canceled_min = convert(Minute, classes_canceled_timeslots * I.Δ_l).value
+    detailed_soft_constraints["nb_hours_cancelled"] = string(
+        Hour(div(classes_canceled_min, 60)) + Minute(ceil(classes_canceled_min % 60)),
+    )
+
+    detailed_soft_constraints["examiner_canceled_obligations"] =
+        Dict{String,Dict{String,Any}}()
+    let get_datetime(l) = I.timeslots_start_datetime[l]
+        for e = 1:I.n_e, (P, is_P_canceled) in q[e]
+            !is_P_canceled && continue
+
+            exa_acro = I.dataset["examiners"][e]["acronym"]
+            datetime_window = (get_datetime(P[1]), get_datetime(P[end]) + I.Δ_l)
+            if !haskey(detailed_soft_constraints["examiner_canceled_obligations"], exa_acro)
+                detailed_soft_constraints["examiner_canceled_obligations"][exa_acro] =
+                    Dict{String,Any}(
+                        "time_slots" => Vector{UnitRange{Int}}(),
+                        "real_datetimes" => Vector{Tuple{DateTime,DateTime}}(),
+                    )
+            end
+
+            push!(
+                detailed_soft_constraints["examiner_canceled_obligations"][exa_acro]["real_datetimes"],
+                datetime_window,
+            )
+            push!(
+                detailed_soft_constraints["examiner_canceled_obligations"][exa_acro]["time_slots"],
+                P,
+            )
+        end
+    end
 
     theoretical_min_days_needed = zeros(Int, I.n_e)
     for e = 1:I.n_e
-        if !is_expert(e)
-            continue
-        end
+        !is_expert(e) && continue
 
         nb_exams_e = Int(
             ceil(
@@ -676,8 +704,9 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
                         total_empty_time = l - prev_exam_l - 1
 
                         discontinuity_in_between = (total_empty_time > I.ν[prev_s] - 1)
+
                         class_time_in_between = sum(
-                            I.α[e, l_tilde] * !I.β[e, l_tilde] * (1 - q[e, l_tilde]) for
+                            sum(l in P for P in I.U[e]) > 0 for
                             l_tilde = prev_exam_l+I.ν[prev_s]-1:l-I.μ[prev_s];
                             init = 0,
                         )
@@ -731,17 +760,22 @@ end
 function draw_RSD_jl_objective_graphs(
     fig_path::String,
     obj_evol::Vector{Dict{String,Vector{Float64}}},
-    time_limit::Float64,
+    time_limit,
 )
     @assert endswith(fig_path, ".png")
+
     n_splits = length(obj_evol)
+    end_time = (
+        !isnothing(time_limit) ? time_limit :
+        maximum([obj_evol[try_id]["time"][end] for split_id = 1:n_splits])
+    )
 
     time = obj_evol[1]["time"]
     objective = obj_evol[1]["objective"]
     plot(
         time,
         objective,
-        xlims = (0, time_limit),
+        xlims = (0, end_time),
         title = "Best RSD_jl objective vs Time",
         xlabel = "Time (seconds)",
         ylabel = "Best objective",
@@ -761,17 +795,22 @@ end
 function draw_SPLIT_objective_graph(
     fig_path::String,
     obj_evol::Vector{Dict{String,Vector{Float64}}},
-    time_limit::Float64,
+    time_limit,
 )
     @assert endswith(fig_path, ".png")
-    n_tries = length(obj_evol)
+
+    n_tries = count(x -> !isempty(x["time"]) && !isempty(x["objective"]), obj_evol)
+    end_time = (
+        !isnothing(time_limit) ? time_limit :
+        maximum([obj_evol[try_id]["time"][end] for try_id = 1:n_tries])
+    )
 
     time = obj_evol[1]["time"]
     objective = obj_evol[1]["objective"]
     plot(
         time,
         objective,
-        xlims = (0, time_limit),
+        xlims = (0, end_time),
         title = "Best SPLIT objective vs Time",
         xlabel = "Time (seconds)",
         ylabel = "Best objective",
