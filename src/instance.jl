@@ -215,27 +215,84 @@ function read_instance(path::String)
         for (start_datetime_str, end_datetime_str) in dict["soft_unavailabilities"]
             start_datetime = DateTime(start_datetime_str)
             end_datetime = DateTime(end_datetime_str)
-
-            start_timeslot = searchsortedlast(timeslots_start_datetime, start_datetime)
-            if start_timeslot == 0 ||
-               Date(timeslots_start_datetime[start_timeslot]) < Date(start_datetime)
-                start_timeslot += 1
+            if start_datetime >= timeslots_start_datetime[end] + Δ_l ||
+               end_datetime <= timeslots_start_datetime[1]
+                continue
             end
 
-            end_timeslot = searchsortedlast(timeslots_start_datetime, end_datetime)
-            (end_timeslot > 0 && timeslots_start_datetime[end_timeslot] == end_datetime) &&
-                (end_timeslot -= 1)
+            start_timeslot_inside =
+                searchsortedfirst(timeslots_start_datetime, start_datetime)
+            end_timeslot_inside =
+                searchsortedlast(timeslots_start_datetime, end_datetime - Δ_l)
+            @assert start_timeslot_inside <= end_timeslot_inside
+            @assert start_timeslot_inside <= n_l
+            @assert end_timeslot_inside > 0
 
-            if start_timeslot <= end_timeslot
-                obligation = start_timeslot:end_timeslot
+            start_timeslot_inside_datetime = timeslots_start_datetime[start_timeslot_inside]
+            end_timeslot_inside_datetime = timeslots_start_datetime[end_timeslot_inside]
+            distances_to_nearest_timeslots = [
+                start_timeslot_inside_datetime - start_datetime,
+                end_datetime - Δ_l - end_timeslot_inside_datetime,
+                (
+                    start_timeslot_inside > 1 ?
+                    start_datetime - (start_timeslot_inside_datetime - Δ_l) : Inf
+                ),
+                (
+                    end_timeslot_inside < n_l ?
+                    end_timeslot_inside_datetime + Δ_l - (end_datetime - Δ_l) : Inf
+                ),
+            ]
+            id_nearest = argmin(distances_to_nearest_timeslots)
+            distance_to_move = min.(Δ_l, distances_to_nearest_timeslots[id_nearest])
 
-                #= If the examiner isn't strongly available then the weak unavailability is considered
-                to be a result of bad data and doesn't exist =#
-                !prod(α[e, obligation]) && continue
+            start_timeslot = nothing
+            end_timeslot = nothing
+            if id_nearest == 1
+                start_timeslot = start_timeslot_inside
 
-                β[e, obligation] .= false
-                push!(U[e], obligation)
+                new_end_datetime = end_datetime + distance_to_move
+                move_end =
+                    (end_timeslot_inside < n_l) &&
+                    (new_end_datetime - Δ_l > end_timeslot_inside_datetime)
+                end_timeslot = end_timeslot_inside + move_end
+
+            elseif id_nearest == 2
+                end_timeslot = end_timeslot_inside
+
+                new_start_datetime = start_datetime - distance_to_move
+                move_start =
+                    (start_timeslot_inside > 1) &&
+                    (new_start_datetime < start_timeslot_inside_datetime)
+                start_timeslot = start_timeslot_inside - move_start
+
+            elseif id_nearest == 3
+                @assert start_timeslot_inside > 1
+                start_timeslot = start_timeslot_inside - 1
+
+                new_end_datetime = end_datetime - distance_to_move
+                move_end =
+                    (end_timeslot_inside > 1) &&
+                    (new_end_datetime - Δ_l < end_timeslot_inside_datetime)
+                end_timeslot = end_timeslot_inside - move_end
+            else
+                @assert end_timeslot_inside < n_l
+                end_timeslot = end_timeslot_inside + 1
+
+                new_start_datetime = start_datetime + distance_to_move
+                move_start =
+                    (start_timeslot_inside < n_l) &&
+                    (new_start_datetime > start_timeslot_inside_datetime)
+                start_timeslot = start_timeslot_inside + move_start
             end
+
+            obligation = start_timeslot:end_timeslot
+
+            #= If the examiner isn't strongly available then the weak unavailability is considered
+            to be a result of bad data and doesn't exist =#
+            !prod(α[e, obligation]) && continue
+
+            β[e, obligation] .= false
+            push!(U[e], obligation)
         end
     end
 
