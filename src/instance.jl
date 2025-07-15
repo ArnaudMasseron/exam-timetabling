@@ -16,6 +16,7 @@ Base.@kwdef struct Instance
     n_m::Int
     n_d::Int
     n_w::Int
+    n_c::Int
 
     ξ::Int
     τ_lun::Int
@@ -77,6 +78,7 @@ function read_instance(path::String)
     n_s = length(dataset["subjects"])
     n_j = length(dataset["groups"])
     n_m = length(dataset["rooms"])
+    n_c = length(dataset["classes"])
 
     timeslots_start_datetime = Vector{DateTime}()
     for (start_datetime_str, end_datetime_str) in
@@ -324,6 +326,7 @@ function read_instance(path::String)
         n_m,
         n_d,
         n_w,
+        n_c,
         ξ,
         τ_lun,
         τ_room,

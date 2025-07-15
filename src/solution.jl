@@ -525,12 +525,8 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
     R = [I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d]
     r = [I.L[d][end] for e = 1:I.n_e, d = 1:I.n_d]
     for j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]
-        exam_going_on = isapprox(
-            sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) /
-            I.η[I.groups[j].s],
-            1,
-            rtol = 0.01,
-        )
+        exam_going_on =
+            sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m; init = 0) > 0
         if exam_going_on
             for e in I.groups[j].e
                 R[e, d] = max(R[e, d], l)
@@ -565,25 +561,66 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
         end
     end
 
+    # Students same class together
+    R_tilde = [I.L[d][1] for j = 1:I.n_j, c = 1:I.n_c, d = 1:I.n_d]
+    r_tilde = [I.L[d][end] for j = 1:I.n_j, c = 1:I.n_c, d = 1:I.n_d]
+    get_stu_class(i) = I.dataset["students"][i]["class_id"]
+    for j = 1:I.n_j, c = 1:I.n_c, d = 1:I.n_d, l in I.L[d]
+        exam_going_on =
+            sum(
+                x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j] && get_stu_class(i) == c for
+                m = 1:I.n_m;
+                init = 0,
+            ) > 0
+        if exam_going_on
+            R_tilde[j, c, d] = max(R_tilde[j, c, d], l)
+            r_tilde[j, c, d] = min(r_tilde[j, c, d], l)
+        end
+    end
+    for j = 1:I.n_j, c = 1:I.n_c, d = 1:I.n_d
+        if r_tilde[j, c, d] > R_tilde[j, c, d]
+            r_tilde[j, c, d] = R_tilde[j, c, d]
+        end
+    end
+
 
     # --- Objective function --- #
     # Soft constraints penalty coefficients
     y_coef = 30 * (I.n_w == 1 ? 0 : 1 / sum((1 - 1 / I.n_w) * I.ε)) # student harmonious exams
-    q_coef = 80 / sum(.!I.β) # examiner availability
+    q_coef = 80 / sum(length(P) for e = 1:I.n_e for P in I.U[e]; init = 0) # examiner availability
+    !isfinite(q_coef) && (q_coef = 0)
     is_expert(e) = (I.dataset["examiners"][e]["type"] == "expert")
     w_coef = 60 / sum(is_expert(e) * I.κ[e] for e = 1:I.n_e) # examiner max days
     z_coef = 50 / sum(I.γ) # exam continuity
     R_coef = 10 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
     Rr_coef = 50 / (I.n_l / I.n_d * sum(I.κ)) # exam grouped
+    group_κ = [minimum(I.κ[e] for e in I.groups[j].e) for j = 1:I.n_j]
+    is_jc_valid = [
+        sum(I.γ[i, j] && (I.dataset["students"][i]["class_id"] == c) for i = 1:I.n_i) > 0 for j = 1:I.n_j, c = 1:I.n_c
+    ]
+    is_j_multi_class = [sum(is_jc_valid[j, :]) >= 2 for j = 1:I.n_j]
+    Rr_tilde_coef =
+        30 / (
+            I.n_l / I.n_d * sum(
+                group_κ[j] * sum(is_jc_valid[j, :]) for j = 1:I.n_j if is_j_multi_class[j];
+                init = 0,
+            )
+        ) # Student same class together
 
     detailed_objective = [
         y_coef * sum(y),
-        q_coef *
-        sum(is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e]),
+        q_coef * sum(
+            is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e];
+            init = 0,
+        ),
         w_coef * sum(is_expert(e) * w[e] for e = 1:I.n_e),
         z_coef * sum(z),
         R_coef * sum(R[e, d] - I.L[d][1] for e = 1:I.n_e, d = 1:I.n_d),
         Rr_coef * sum(R .- r),
+        Rr_tilde_coef * sum(
+            R_tilde[j, c, d] .- r_tilde[j, c, d] for j = 1:I.n_j if is_j_multi_class[j]
+            for c = 1:I.n_c if is_jc_valid[j, c] for d = 1:I.n_d;
+        ),
     ]
     objective = sum(detailed_objective)
 
