@@ -29,54 +29,61 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
     that have the same group) so that students from the same class are next to one another 
     =#
 
-    for j = 1:I.n_j, m = 1:I.n_m, d = 1:I.n_d, l in I.L[d]
+    for j = 1:I.n_j
         s = I.groups[j].s
         !I.dataset["subjects"][s]["group_students_by_class"] && continue
 
-        if sum(x_values[i, j, l, m] for i = 1:I.n_i) > 0
+        l = 1
+        d = 1
+        while l <= I.n_l
+            if sum(x_values[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m) <= 0
+                l += 1
+            else
+                students_in_serie = []
 
-            # Find the students in the current exam series
-            students_in_serie = []
-            let curr_l = l
-                while true
-                    curr_l > I.L[d][end] && break
+                list_m = findall(identity, sum(x_values[i, j, l, :] for i = 1:I.n_i) .> 0)
+                @assert length(list_m) == 1
+                m = first(list_m)
 
-                    students_l = findall(identity, x_values[:, j, curr_l, m])
-                    isempty(students_l) && break
+                let curr_l = l
+                    while true
+                        curr_l > I.L[d][end] && break
 
-                    @assert length(students_l) == I.η[s]
+                        students_l = findall(identity, x_values[:, j, curr_l, m])
+                        isempty(students_l) && break
+                        @assert length(students_l) == I.η[s]
 
-                    for i in students_l
-                        x_values[i, j, curr_l, m] = false
+                        for i in students_l
+                            x_values[i, j, curr_l, m] = false
+                        end
+                        students_in_serie = vcat(students_in_serie, students_l)
+
+                        curr_l += 1
                     end
-
-                    students_in_serie = vcat(students_in_serie, students_l)
-                    curr_l += 1
                 end
-            end
 
-            #= 
-            This array tells in which order the classes should be reordered
-            The class id is not used directly so that its not always students from a
-            specific class first
-            =#
-            student_to_class_position = Dict{Int,Int}()
-            let class_id_to_position = Dict{Int,Int}()
-                for i in students_in_serie
-                    c = I.dataset["students"][i]["class_id"]
+                #= 
+                This array tells in which order the classes should be reordered
+                The class id is not used directly so that its not always students from a
+                specific class first
+                =#
+                student_to_class_position = Dict{Int,Int}()
+                let class_id_to_position = Dict{Int,Int}()
+                    for i in students_in_serie
+                        c = I.dataset["students"][i]["class_id"]
 
-                    if !haskey(class_id_to_position, c)
-                        class_id_to_position[c] = length(class_id_to_position) + 1
+                        if !haskey(class_id_to_position, c)
+                            class_id_to_position[c] = length(class_id_to_position) + 1
+                        end
+                        student_to_class_position[i] = class_id_to_position[c]
                     end
-                    student_to_class_position[i] = class_id_to_position[c]
                 end
-            end
 
-            # Reorder the students by their class position
-            sort(students_in_serie, by = (i -> student_to_class_position[i]))
+                # Reorder the students by their class position
+                sort!(students_in_serie, by = (i -> student_to_class_position[i]))
 
-            # Change x_values
-            let curr_l = l
+                # Change x_values
+                curr_l = l
                 nb_stu_l = 0
                 for i in students_in_serie
                     x_values[i, j, curr_l, m] = true
@@ -86,7 +93,11 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
                         curr_l += 1
                     end
                 end
+
+                l = curr_l
             end
+
+            (l > I.L[d][end]) && (d += 1)
         end
     end
 end
