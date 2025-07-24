@@ -585,6 +585,8 @@ function split_instance(
     mip_gap_SPLIT = 0.05,
     n_max_tries = 1,
     print_pb_constraints = false,
+    frozen_ijlm = nothing,
+    start_x_values = nothing,
 )
     #= 
     Split the instance into multiple subinstances until a feasible split has been found.
@@ -634,6 +636,27 @@ function split_instance(
             set_optimizer_attribute(SPLIT_model, "TimeLimit", time_limit_SPLIT)
         !isnothing(mip_gap_SPLIT) &&
             set_optimizer_attribute(SPLIT_model, "MIPGap", mip_gap_SPLIT)
+
+        # Provide a starting solution if available
+        if !isnothing(start_x_values)
+            for (((i, j), d), var) in SPLIT_model[:y].data
+                scheduled_in_start =
+                    sum(start_x_values[i, j, l, m] for l in I.L[d], m = 1:I.n_m) > 0
+                set_start_value(var, Int(scheduled_in_start))
+            end
+        end
+
+        # Freeze the exams if needed
+        if !isnothing(frozen_ijlm)
+            days_start = [I.L[d][1] for d = 1:I.n_d]
+            @assert issorted(days_start)
+            get_day(l) = searchsortedfirst(days_start, l)
+
+            for (i, j, l, m) in frozen_ijlm
+                d = get_day(l)
+                fix(SPLIT_model[:y][(i, j), d], 1; force = true)
+            end
+        end
     end
 
     # Solve the splitting problem until a feasible split has been found
@@ -706,6 +729,24 @@ function split_instance(
                 "TimeLimit",
                 time_limit_warmstart,
             )
+
+            # Provide a starting solution if available
+            if !isnothing(start_x_values)
+                for ((i, j, l), var) in RSD_jl_split_warm[:g].data
+                    scheduled_in_start = sum(start_x_values[i, j, l, m] for m = 1:I.n_m) > 0
+                    is_completely_removed = (i, j) in completely_removed_exams
+                    set_start_value(var, Int(scheduled_in_start && !is_completely_removed))
+                end
+            end
+
+            # Freeze certain exams if needed
+            if !isnothing(frozen_ijlm)
+                for (i, j, l, m) in frozen_ijlm
+                    (!((i, j) in completely_removed_exams)) &&
+                        fix(RSD_jl_split_warm[:g][i, j, l], 1; force = true)
+                end
+            end
+
             optimize!(RSD_jl_split_warm)
 
             # If the split is infeasible then find the exams that cause problem
@@ -747,6 +788,26 @@ function split_instance(
                             RSD_jl_split_warm,
                             sum(RSD_jl_split_warm[:g][exam[1], exam[2], :]) == 0
                         )
+                    end
+
+                    if !isnothing(frozen_ijlm)
+                        for (i, j, l, m) in frozen_ijlm
+                            (!((i, j) in completely_removed_exams)) &&
+                                fix(RSD_jl_split_warm[:g][i, j, l], 1; force = true)
+                        end
+                    end
+
+                    # Provide a starting solution if available
+                    if !isnothing(start_x_values)
+                        for ((i, j, l), var) in RSD_jl_split_warm[:g].data
+                            scheduled_in_start =
+                                sum(start_x_values[i, j, l, m] for m = 1:I.n_m) > 0
+                            is_completely_removed = (i, j) in completely_removed_exams
+                            set_start_value(
+                                var,
+                                Int(scheduled_in_start && !is_completely_removed),
+                            )
+                        end
                     end
 
                     optimize!(RSD_jl_split_warm)

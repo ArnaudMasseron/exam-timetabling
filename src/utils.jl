@@ -1,5 +1,5 @@
-# Save macro that creates the folder if it doesnt exist
-macro save_with_dir(path, data)
+# Save function that creates the folder if it doesnt exist
+function save_with_dir(path::String, data)
     # If the directory doesnt exist then create it
     dir_path = dirname(path)
     isdir(dir_path) || mkpath(dir_path)
@@ -62,7 +62,7 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
                     while true
                         curr_l > I.L[d][end] && break
 
-                        students_l = findall(identity, x_values[:, j, curr_l, m])
+                        students_l = findall(identity, view(x_values, :, j, curr_l, m))
                         isempty(students_l) && break
                         @assert length(students_l) == I.η[s]
 
@@ -151,4 +151,49 @@ function get_instance_arguments(instance_path::String)
     time_step_min = parse(Int, instance_arguments[4][1:end-8])
 
     return year, instance_type, time_step_min
+end
+
+function get_frozen_exams(I::Instance, modalities_reschedule, start_x_values::Array{Bool,4})
+    #=
+    Get the exams in starting_x_values that shouldn't be rescheduled
+    Arguments:
+    [input] I: instance
+    [input] modalties_reschedule : modalities of the exams that need to be rescheduled
+    [input] start_x_values : modalities of the exams that need to be rescheduled
+
+    Return value: set of all (i,j) exams that need to be frozen
+    i.e. not be rescheduled
+    =#
+
+    exams_reschedule = Set{Tuple{Int,Int}}()
+    for modality in modalities_reschedule
+        exam_id = findfirst(x -> x["modality"] == modality, I.dataset["exams"])
+        i = I.dataset["exams"][exam_id]["student_id"]
+        j = I.dataset["exams"][exam_id]["group_id"]
+        push!(exams_reschedule, (i, j))
+    end
+
+    # Allow the exams of dummy students to be rescheduled
+    dummy_exams = Set{Tuple{Int,Int}}()
+    dummy_class_id = findfirst(x -> contain(x["acronym"], "dummy"), I.dataset["classes"])
+    if !isnothing(dummy_class_id)
+        dummy_students =
+            findall(x -> x["class_id"] == dummy_class_id, I.dataset["students"])
+        dummy_exams = Set([(i, j) for i in dummy_students, j = 1:I.n_j if I.γ[i, j]])
+    end
+
+    instance_exams = Set([(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]])
+    frozen_exams = setdiff!(instance_exams, union(exams_reschedule, dummy_exams))
+
+    # Get the ijlm indexes in start_x_values coreresponding to the frozen exams
+    frozen_ijlm = Set{NTuple{4,Int}}()
+    for (i, j) in frozen_exams
+        cart_id = findfirst(identity, view(x_values, i, j, :, :))
+        if !isnothing(cart_id)
+            i, j = cart_id.I
+            push!(frozen_ijlm, (i, j, l, m))
+        end
+    end
+
+    return frozen_ijlm
 end

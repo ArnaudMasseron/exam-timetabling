@@ -2019,6 +2019,6 @@ function declare_splitting_MILP(
         z_coef * sum(is_expert(e) * sum(z[e, :]) for e = 1:I.n_e) +
         p_coef * sum(p) +
         q_coef * sum(q) +
-        t_coef * sum(t)
+        t_coef * sum(t; init = 0)
     @objective(model, Min, objective)
 end
