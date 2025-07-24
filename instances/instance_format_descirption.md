@@ -41,3 +41,5 @@
   * **name** -> name of the student
   * **class_id** -> index of the class of the student, this references the position in the **classes** list
   * **unavailabilities** -> list containing the datetimes where the current student is unavailable; it is under the format *[start datetime, end datetime]*
+
+The name of the instance files must have the following format in order for the generated solution files names to be coherent: `${YEAR}_dataset_${INSTANCE_TYPE}_${TIME_STEP_LENGTH_MIN}min.json`. This is because the generated names for the solution files are created based on the name of the instance file. The terms with the format `${TERM_NAME}` are to be replaced with what corresponds to the instance and should not contain any `_` character. The argument `${INSTANCE_TYPE}` is there to be able to differentiate instances within the same year, like `tiny` or `huge` instances for example. It can be set to whatever is wanted, as long as it doesn't contain any `_` character.
