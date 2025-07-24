@@ -66,7 +66,8 @@ function write_solution_json(
         examiner_names = map(e -> I.dataset["examiners"][e]["name"], I.groups[j].e)
         examiner_acronyms = map(e -> I.dataset["examiners"][e]["acronym"], I.groups[j].e)
 
-        subject_name = I.dataset["subjects"][s]["acronym"]
+        s = I.groups[j].s
+        subject_name = I.dataset["subjects"][s]["name"]
 
         exam_id =
             findfirst(x -> x["student_id"] == i && x["group_id"] == j, I.dataset["exams"])
@@ -94,6 +95,10 @@ function write_solution_json(
         "soft_constraints_costs" => sol_cost[2],
         "interpretable_KPIs" => sol_cost[3],
     )
+
+    # If the save directory doesn't exist then create it
+    dir_path = dirname(solution_path)
+    isdir(dir_path) || mkpath(dir_path)
 
     # Save exams in a json file
     open(solution_path, "w") do file
@@ -620,6 +625,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
         Rr_tilde_coef * sum(
             R_tilde[j, c, d] .- r_tilde[j, c, d] for j = 1:I.n_j if is_j_multi_class[j]
             for c = 1:I.n_c if is_jc_valid[j, c] for d = 1:I.n_d;
+            init = 0,
         ),
     ]
     objective = sum(detailed_objective)
@@ -629,8 +635,10 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     detailed_soft_constraints["nb_non_harmonious_students"] = sum(y .> 0)
 
-    classes_canceled_timeslots =
-        sum(is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e])
+    classes_canceled_timeslots = sum(
+        is_P_canceled * length(P) for e = 1:I.n_e for (P, is_P_canceled) in q[e];
+        init = 0,
+    )
     classes_canceled_min = convert(Minute, classes_canceled_timeslots * I.Δ_l).value
     detailed_soft_constraints["nb_hours_cancelled"] = string(
         Hour(div(classes_canceled_min, 60)) + Minute(ceil(classes_canceled_min % 60)),
@@ -671,7 +679,8 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
             ceil(
                 sum(
                     I.γ[i, j] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for
-                    i = 1:I.n_i
+                    i = 1:I.n_i;
+                    init = 0,
                 ),
             ),
         )
@@ -701,6 +710,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
 
     detailed_soft_constraints["nb_penalized_exam_discontinuities"] = sum(z)
 
+    # The code inside this if block runs very slowly, it may be improved
     if compute_unwanted_breaks
         has_exam = zeros(Bool, I.n_e, I.n_d)
         unwanted_breaks = zeros(Int, I.n_e, I.n_d)
@@ -743,7 +753,7 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
                         discontinuity_in_between = (total_empty_time > I.ν[prev_s] - 1)
 
                         class_time_in_between = sum(
-                            sum(l in P for P in I.U[e]) > 0 for
+                            sum(l in P for P in I.U[e]; init = 0) > 0 for
                             l_tilde = prev_exam_l+I.ν[prev_s]-1:l-I.μ[prev_s];
                             init = 0,
                         )
@@ -785,10 +795,12 @@ function solution_cost(I::Instance, x::Array{Bool,4}; compute_unwanted_breaks = 
             end
         end
         mean_unwanted_breaks_min =
-            sum(unwanted_breaks) / sum(has_exam) * Int(round(I.Δ_l / Minute(1)))
-        detailed_soft_constraints["mean_examiner_unwanted_breaks"] =
+            sum(unwanted_breaks; init = 0) / sum(has_exam; init = 0) *
+            Int(round(I.Δ_l / Minute(1)))
+        detailed_soft_constraints["mean_examiner_unwanted_breaks"] = string(
             Hour(div(mean_unwanted_breaks_min, 60)) +
-            Minute(ceil(mean_unwanted_breaks_min % 60))
+            Minute(ceil(mean_unwanted_breaks_min % 60)),
+        )
     end
 
     return objective, detailed_objective, detailed_soft_constraints
@@ -861,5 +873,30 @@ function draw_SPLIT_objective_graph(
     end
 
     plot!(legend = :topright)
+    savefig(fig_path)
+end
+
+
+function draw_RSD_ijlm_objective_graphs(
+    fig_path::String,
+    obj_evol::Dict{String,Vector{Float64}},
+    time_limit,
+)
+    @assert endswith(fig_path, ".png")
+
+    end_time = (!isnothing(time_limit) ? time_limit : obj_evol["time"][end])
+
+    time = obj_evol["time"]
+    objective = obj_evol["objective"]
+    plot(
+        time,
+        objective,
+        xlims = (0, end_time),
+        title = "Best RSD_ijlm objective vs Time",
+        xlabel = "Time (seconds)",
+        ylabel = "Best objective",
+        linetype = :steppost,
+    )
+
     savefig(fig_path)
 end

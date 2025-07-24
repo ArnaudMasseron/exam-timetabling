@@ -431,7 +431,7 @@ function check_infeasible_basic(I::Instance; fill_rate = 1)
                 end
             end
         end
-        available_time = fill_rate * (I.n_l - sum(.!I.α[e, :]))
+        available_time = fill_rate * sum(.!I.α[e, :])
         days_needed = max(ceil(time_needed / available_time), ceil(nb_exams / I.ζ[e]))
 
         if time_needed <= available_time
@@ -514,7 +514,7 @@ function _create_split_instances(
     nb_exams_examiner = zeros(Float64, I.n_e, n_splits)
     exam_splits = [Set{Tuple{Int,Int}}() for split = 1:n_splits]
     for exam in exams, split = 1:n_splits
-        if sum(y_values[exam, d] for d in days_split[split]) >= 0.5
+        if sum(y_values[(exam, d)] for d in days_split[split]) >= 0.5
             push!(exam_splits[split], exam)
 
             j = exam[2]
@@ -525,7 +525,7 @@ function _create_split_instances(
     end
 
     κ_splits = [
-        Int(round(sum(z_values[e, d] for d in days_split[split]))) for e = 1:I.n_e,
+        Int(round(sum(z_values[(e, d)] for d in days_split[split]))) for e = 1:I.n_e,
         split = 1:n_splits
     ]
 
@@ -595,7 +595,9 @@ function split_instance(
     [input] I: original instance
     [input] n_splits: number of splits
     [input] fill_rate: parameter that controls how filled the splits can be
-    [input] time_limit_sec: time limit in seconds for each MILP resolution
+    [input] time_limit_warmstart: time limit in seconds for each warmstart resolution
+    [input] time_limit_SPLIT: time limit in seconds for each SPLIT model resolution
+    [input] mip_gap_SPLIT: goal gap for each SPLIT model resolution
     [input] : maximum number of times where the splitting MILP can be solved
 
     Return value: (split_instances, g_values_warmstart) 
@@ -603,6 +605,7 @@ function split_instance(
     g_values_warmstart: values of the g variable for the original instance  fter the warmstarts
     =#
 
+    @assert n_splits >= 1
     @assert n_splits <= I.n_d "Can't have more splits than the number of days"
     @assert 0 < fill_rate <= 1 "The filling rate must be in (0, 1]"
 
@@ -623,11 +626,15 @@ function split_instance(
     exams = sort([(i, j) for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j]])
 
     # Declare the splitting model
-    model = Model(Gurobi.Optimizer)
-    declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, model)
-    !isnothing(time_limit_SPLIT) &&
-        set_optimizer_attribute(model, "TimeLimit", time_limit_SPLIT)
-    !isnothing(mip_gap_SPLIT) && set_optimizer_attribute(model, "MIPGap", mip_gap_SPLIT)
+    SPLIT_model = nothing
+    if n_splits > 1
+        SPLIT_model = Model(Gurobi.Optimizer)
+        declare_splitting_MILP(I, n_splits, fill_rate, exams, days_split, SPLIT_model)
+        !isnothing(time_limit_SPLIT) &&
+            set_optimizer_attribute(SPLIT_model, "TimeLimit", time_limit_SPLIT)
+        !isnothing(mip_gap_SPLIT) &&
+            set_optimizer_attribute(SPLIT_model, "MIPGap", mip_gap_SPLIT)
+    end
 
     # Solve the splitting problem until a feasible split has been found
     feasible_splits_found = false
@@ -637,38 +644,54 @@ function split_instance(
     completely_removed_exams = Set{Tuple{Int,Int}}()
     try_id = 1
     while !feasible_splits_found && try_id <= n_max_tries
-        # Warmstart
-        let objective_splitting_MILP = objective_function(model)
-            @objective(model, Min, 0)
-            optimize!(model)
+        y_values = nothing
+        z_values = nothing
+        if n_splits == 1
+            # If n_splits == 1 there is no need to solve the splitting MILP
+            y_values = Dict((exam, 1) => Int((d == 1)) for exam in exams, d = 1:I.n_d)
+            z_values = Dict((e, d) => (d == 1) * I.κ[e] for e = 1:I.n_e, d = 1:I.n_d)
+        else
+            # Warmstart
+            let objective_splitting_MILP = objective_function(SPLIT_model)
+                @objective(SPLIT_model, Min, 0)
+                optimize!(SPLIT_model)
 
-            # If the model is infeasible the print the problematic constraints
-            if !has_values(model)
-                error_message = "Unable to split the instance.\nThis can be the result of a time limit that is too small, or a filling rate that is too low."
-                if termination_status(model) in
-                   [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] && print_pb_constraints
-                    error_message *= "\nThe problematic constraints have been printed."
-                    print_constraint_conflicts(model)
+                # If the SPLIT_model is infeasible the print the problematic constraints
+                if !has_values(SPLIT_model)
+                    error_message = "Unable to split the instance.\nThis can be the result of a time limit that is too small, or a filling rate that is too low."
+                    if termination_status(SPLIT_model) in
+                       [MOI.INFEASIBLE, MOI.INFEASIBLE_OR_UNBOUNDED] && print_pb_constraints
+                        error_message *= "\nThe problematic constraints have been printed."
+                        print_constraint_conflicts(SPLIT_model)
+                    end
+                    error(error_message)
                 end
-                error(error_message)
+
+                @objective(SPLIT_model, Min, objective_splitting_MILP)
             end
 
-            @objective(model, Min, objective_splitting_MILP)
+            # Set objective value fetching callback function
+            callback_f = get_objective_value_callback(try_id, SPLIT_obj_evol)
+            MOI.set(SPLIT_model, Gurobi.CallbackFunction(), callback_f)
+
+            # Solve the MILP splitting problem
+            optimize!(SPLIT_model)
+
+            push!(SPLIT_obj_evol[try_id]["time"], JuMP.solve_time(SPLIT_model))
+            push!(
+                SPLIT_obj_evol[try_id]["objective"],
+                SPLIT_obj_evol[try_id]["objective"][end],
+            )
+
+            # Read the results
+            y_values_jump = value.(SPLIT_model[:y])
+            z_values_jump = value.(SPLIT_model[:z])
+
+            y_values =
+                Dict((exam, d) => y_values_jump[exam, d] for exam in exams, d = 1:I.n_d)
+            z_values = Dict((e, d) => z_values_jump[e, d] for e = 1:I.n_e, d = 1:I.n_d)
         end
 
-        # Set objective value fetching callback function
-        callback_f = get_objective_value_callback(try_id, SPLIT_obj_evol)
-        MOI.set(model, Gurobi.CallbackFunction(), callback_f)
-
-        # Solve the MILP splitting problem
-        optimize!(model)
-
-        push!(SPLIT_obj_evol[try_id]["time"], JuMP.solve_time(model))
-        push!(SPLIT_obj_evol[try_id]["objective"], SPLIT_obj_evol[try_id]["objective"][end])
-
-        # Read the results
-        y_values = value.(model[:y])
-        z_values = value.(model[:z])
         split_instances = _create_split_instances(I, exams, days_split, y_values, z_values)
 
         # Check if the splits instances are feasible by warmstarting the different splits
@@ -687,6 +710,13 @@ function split_instance(
 
             # If the split is infeasible then find the exams that cause problem
             if !has_values(RSD_jl_split_warm)
+                if n_splits == 1
+                    error(
+                        "Couldn't warmstart the RSD_jl submodel.
+                  Either the instance is infeasible or the warmstart time limit is too low.",
+                    )
+                end
+
                 feasible_splits_found = false
 
                 if termination_status(RSD_jl_split_warm) in
@@ -697,7 +727,7 @@ function split_instance(
 
                 pb_exams = _find_problematic_exams(RSD_jl_split_warm)
 
-                # Ban the problematic exams in the splitting in the splitting MILP
+                # Ban the problematic exams in the splitting MILP
                 if try_id == n_max_tries
                     RSD_jl_split_warm = Model(Gurobi.Optimizer)
                     declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
@@ -710,7 +740,9 @@ function split_instance(
 
                     for exam in pb_exams
                         push!(completely_removed_exams, exam)
+                        delete!(split_instances[split].exams, exam)
 
+                        delete(RSD_jl_split_warm, RSD_jl_split_warm[:exam_needed][exam])
                         RSD_jl_split_warm[:exam_needed][exam] = @constraint(
                             RSD_jl_split_warm,
                             sum(RSD_jl_split_warm[:g][exam[1], exam[2], :]) == 0
@@ -718,6 +750,7 @@ function split_instance(
                     end
 
                     optimize!(RSD_jl_split_warm)
+                    @assert has_values(RSD_jl_split_warm)
                 else
                     for exam in pb_exams
                         if !haskey(banned_exams, exam)
@@ -725,7 +758,7 @@ function split_instance(
                         end
                         push!(banned_exams[exam], split)
                         for d in days_split[split]
-                            fix(model[:y][exam, d], 0; force = true)
+                            fix(SPLIT_model[:y][exam, d], 0; force = true)
                         end
 
                         if length(banned_exams[exam]) == n_splits
@@ -733,7 +766,9 @@ function split_instance(
                         end
                     end
                 end
-            else
+            end
+
+            if has_values(RSD_jl_split_warm) || try_id == n_max_tries
                 # Get the warmstart values
                 g_values_dict = value.(RSD_jl_split_warm[:g]).data
                 for ((i, j, l), value) in g_values_dict
@@ -749,11 +784,11 @@ function split_instance(
             remaining_exams = setdiff!(exams, completely_removed_exams)
 
             # Actualise the exam one split constraint
-            delete(model, model[:exam_needed].data)
-            model[:exam_needed] = @constraint(
-                model,
+            delete(SPLIT_model, SPLIT_model[:exam_needed].data)
+            SPLIT_model[:exam_needed] = @constraint(
+                SPLIT_model,
                 [exam in remaining_exams],
-                sum(model[:y][exam, d] for d = 1:I.n_d) == 1
+                sum(SPLIT_model[:y][exam, d] for d = 1:I.n_d) == 1
             )
 
             # Remove the exams from the instance

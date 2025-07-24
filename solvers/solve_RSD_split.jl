@@ -1,44 +1,54 @@
-# Load packages
+# Load packages and source files
 using JuMP, Gurobi, JLD2
-
-# Load source files
 repo_path = String(@__DIR__) * "/../"
 include(repo_path * "src/instance.jl")
 include(repo_path * "src/model.jl")
 include(repo_path * "src/solution.jl")
 include(repo_path * "src/utils.jl")
 
-# Load the arguments given to the script
-year = "2023-2024"
-instance_type = "business_school"
+
+# ---------- USER SET PARAMETERS ---------- #
+# The following parameters must be set by the user
+# useless if the script is launched from the terminal
+instance_path =
+    repo_path *
+    "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type)_$(time_step_min)min.json"
+
 n_splits = 4
-time_limit_sec = 60
+time_limit_seconds = 60
 fill_rate = 0.95
 save_debug = false
 save_solution = false
+# ----------------------------------------- #
+
+
+# If solve_RSD_split.jl launched from the terminal the load the parameters
+# given in the terminal instead
 if !isempty(ARGS)
-    @assert length(ARGS) == 5 "Incorrect amount of arguments given"
-    year = string(ARGS[1])
-    instance_type = string(ARGS[2])
-    n_splits = parse(Int, ARGS[3])
-    time_limit_sec = parse(Int, ARGS[4])
-    fill_rate = parse(Float64, ARGS[5])
+    @assert length(ARGS) == 4 "Incorrect amount of arguments given"
+    instance_path = string(ARGS[1])
+    n_splits = parse(Int, ARGS[2])
+    time_limit_seconds = parse(Int, ARGS[3])
+    fill_rate = parse(Float64, ARGS[4])
     save_debug = true
     save_solution = true
 end
 
 # Set solution saving parameters
-save_dir = repo_path * "solutions/RSD_split/"
+year, instance_type, time_step_min = get_instance_arguments(instance_path)
+save_dir = repo_path * "solutions/RSD_split/" # directory were data will be saved
 save_radical =
     "RSDsplit_" *
     "$(year)$(instance_type)_" *
+    "$(time_step_min)minTimeStep_" *
     "$(n_splits)splits_" *
-    "$(isnothing(time_limit_sec) ? "no" : string(time_limit_sec) * "sec")TimeLimit_" *
+    "$(isnothing(time_limit_seconds) ? "no" : string(time_limit_seconds) * "sec")TimeLimit_" *
     "$(fill_rate)FillRate"
 
 # Read instance
 instance_path =
-    repo_path * "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type).json"
+    repo_path *
+    "datasets/$(year)/json_instances/$(year)_dataset_$(instance_type)_$(time_step_min)min.json"
 instance = read_instance(instance_path);
 
 # Perform basic preliminary infeasibility checks
@@ -50,7 +60,8 @@ SPLIT_obj_evol = [
     Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}()) for
     try_id = 1:n_max_tries
 ]
-time_limit_one_split = (!isnothing(time_limit_sec) ? time_limit_sec / n_splits : nothing)
+time_limit_one_split =
+    (!isnothing(time_limit_seconds) ? time_limit_seconds * 0.9 / n_splits : nothing)
 println_dash("Start solving instance splitting model")
 split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
@@ -58,12 +69,17 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     SPLIT_obj_evol;
     fill_rate = fill_rate,
     time_limit_warmstart = time_limit_one_split / 5,
+    time_limit_SPLIT = time_limit_seconds / 5,
+    n_max_tries = n_max_tries,
 )
 if save_debug
-    @save save_dir * "debug/SPLIT_obj_evol.jld2" SPLIT_obj_evol
+    @save_with_dir save_dir * "debug/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
+    @save_with_dir save_dir * "debug/g_values_warmstart_" * save_radical * ".jld2" g_values_warmstart
+    @save_with_dir save_dir * "debug/completely_removed_exams_" * save_radical * ".jld2" completely_removed_exams
+    @save_with_dir save_dir * "debug/instance_" * save_radical * ".jld2" instance
 end
 if save_solution
-    @save save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
+    @save_with_dir save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2" SPLIT_obj_evol
     draw_SPLIT_objective_graph(
         save_dir * "graphs/graph_SPLIT_" * save_radical * ".png",
         SPLIT_obj_evol,
@@ -115,11 +131,14 @@ for (split_id, SplitI) in enumerate(split_instances)
     end
 end
 if save_debug
-    @save save_dir * "debug/f_values.jld2" f_values
-    @save save_dir * "debug/RSD_jl_obj_evol.jld2" RSD_jl_obj_evol
+    @save_with_dir save_dir * "debug/f_values_" * save_radical * ".jld2" f_values
+    @save_with_dir save_dir * "debug/RSD_jl_obj_evol_" * save_radical * ".jld2" RSD_jl_obj_evol
 end
 if save_solution
-    @save save_dir * "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2" RSD_jl_obj_evol
+    @save_with_dir save_dir *
+                   "graphs/graph_data/RSD_jl_obj_evol_RSD_" *
+                   save_radical *
+                   ".jld2" RSD_jl_obj_evol
     draw_RSD_jl_objective_graphs(
         save_dir * "graphs/graph_RSD_jl_" * save_radical * ".png",
         RSD_jl_obj_evol,
@@ -135,8 +154,8 @@ let
 
     RSD_jlm = Model(Gurobi.Optimizer)
     declare_RSD_jlm(instance, f_values, RSD_jlm)
-    !isnothing(time_limit_sec) &&
-        set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_sec / 10)
+    !isnothing(time_limit_seconds) &&
+        set_optimizer_attribute(RSD_jlm, "TimeLimit", time_limit_seconds / 10)
 
     optimize!(RSD_jlm)
     @assert termination_status(RSD_jlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
@@ -149,28 +168,36 @@ let
     end
 end
 if save_debug
-    @save save_dir * "debug/b_values.jld2" b_values
+    @save_with_dir save_dir * "debug/b_values_" * save_radical * ".jld2" b_values
 end
 
 # Add the students, i.e. solve RSD_ijlm
 x_values = zeros(Bool, instance.n_i, instance.n_j, instance.n_l, instance.n_m)
+RSD_ijlm_obj_evol = [Dict("objective" => Vector{Float64}(), "time" => Vector{Float64}())]
 let
     global x_values
     println_dash("Start solving RSD_ijlm submodel")
 
     RSD_ijlm = Model(Gurobi.Optimizer)
     declare_RSD_ijlm(instance, b_values, RSD_ijlm)
-    !isnothing(time_limit_sec) &&
-        set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_sec / 10)
+    !isnothing(time_limit_seconds) &&
+        set_optimizer_attribute(RSD_ijlm, "TimeLimit", time_limit_seconds / 10)
 
     # Warmstart
     objective = objective_function(RSD_ijlm)
     @objective(RSD_ijlm, Min, 0)
     optimize!(RSD_ijlm)
 
+    # Set objective value fetching callback function
+    callback_f = get_objective_value_callback(1, RSD_ijlm_obj_evol)
+    MOI.set(RSD_ijlm, Gurobi.CallbackFunction(), callback_f)
+
     @objective(RSD_ijlm, Min, objective)
     optimize!(RSD_ijlm)
     @assert termination_status(RSD_ijlm) != MOI.INFEASIBLE_OR_UNBOUNDED "Create a split that is feasible or increase the time limit"
+
+    push!(RSD_ijlm_obj_evol[1]["time"], JuMP.solve_time(RSD_ijlm))
+    push!(RSD_ijlm_obj_evol[1]["objective"], RSD_ijlm_obj_evol[1]["objective"][end])
 
     dict_x_values = value.(RSD_ijlm[:x]).data
     for ((i, j, l, m), value) in dict_x_values
@@ -180,20 +207,32 @@ let
     end
 end
 if save_debug
-    @save save_dir * "debug/x_values.jld2" x_values
+    @save_with_dir save_dir * "debug/x_values_" * save_radical * ".jld2" x_values
+    @save_with_dir save_dir * "debug/RSD_ijlm_obj_evol_" * save_radical * ".jld2" RSD_ijlm_obj_evol
+end
+if save_solution
+    @save_with_dir save_dir *
+                   "graphs/graph_data/RSD_ijlm_obj_evol_RSD_" *
+                   save_radical *
+                   ".jld2" RSD_ijlm_obj_evol
+    draw_RSD_ijlm_objective_graphs(
+        save_dir * "graphs/graph_RSD_ijlm_" * save_radical * ".png",
+        RSD_ijlm_obj_evol[1],
+        (!isnothing(time_limit_seconds) ? time_limit_seconds / 10 : nothing),
+    )
 end
 
 # Reorder the students inside exam series according to their classes
 reorder_students_inside_series(instance, x_values)
 
 # Compute the cost of the solution
-sol_cost = solution_cost(instance, x_values; compute_unwanted_breaks = true)
+@time sol_cost = solution_cost(instance, x_values; compute_unwanted_breaks = true)
 
 # Save the solution
 if save_solution
     println_dash("Start saving the solution")
 
-    @save save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
+    @save_with_dir save_dir * "x_values/x_values_" * save_radical * ".jld2" x_values
     write_solution_json(
         instance,
         x_values,

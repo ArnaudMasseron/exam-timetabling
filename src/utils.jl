@@ -1,3 +1,12 @@
+# Save macro that creates the folder if it doesnt exist
+macro save_with_dir(path, data)
+    # If the directory doesnt exist then create it
+    dir_path = dirname(path)
+    isdir(dir_path) || mkpath(dir_path)
+
+    @save path data
+end
+
 # Print the message by adding dashes before and after
 function println_dash(mystring::String)
     println(repeat("-", 30) * " " * mystring * " " * repeat("-", 30))
@@ -5,6 +14,10 @@ function println_dash(mystring::String)
 end
 
 function print_constraint_conflicts(model::Model, name_only::Bool = false)
+    #=
+    Print a subset of constraints containing the constraints that 
+    make the model infeasible.
+    =#
     compute_conflict!(model)  # Compute IIS
 
     # Check all constraints (including variable bounds)
@@ -102,7 +115,6 @@ function reorder_students_inside_series(I::Instance, x_values::Array{Bool,4})
     end
 end
 
-# Set objective value fetching callback function
 function get_objective_value_callback(
     entry_id::Int,
     objective_evolution::Vector{Dict{String,Vector{Float64}}},
@@ -127,4 +139,16 @@ function get_objective_value_callback(
         end
 
     return f
+end
+
+function get_instance_arguments(instance_path::String)
+    @assert endswith(instance_path, ".json")
+    instance_name = basename(instance_path)
+
+    instance_arguments = split(instance_name, "_")
+    year = instance_arguments[1]
+    instance_type = instance_arguments[3]
+    time_step_min = parse(Int, instance_arguments[4][1:end-8])
+
+    return year, instance_type, time_step_min
 end

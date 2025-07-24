@@ -566,6 +566,7 @@ function declare_CM(I::Instance, model::Model)
                 init = 0,
             )
         )
+    !isfinite(Rr_tilde_coef) && (Rr_tilde_coef = 0)
 
     objective =
         y_coef * sum(y) +
@@ -577,6 +578,7 @@ function declare_CM(I::Instance, model::Model)
         Rr_tilde_coef * sum(
             R_tilde[j, c, d] .- r_tilde[j, c, d] for j = 1:I.n_j if is_j_multi_class[j] for
             c = 1:I.n_c if is_jc_valid[j, c] for d = 1:I.n_d;
+            init = 0,
         )
     @objective(model, Min, objective)
 end
@@ -1542,7 +1544,7 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
 
     # Room switch break
     let
-        M(s) = ceil(I.μ[s] + I.τ_room) / I.ν[s]
+        M(s) = ceil((I.μ[s] + I.τ_room) / I.ν[s])
 
         @constraint(
             model,
@@ -1813,6 +1815,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
                 init = 0,
             )
         )
+    !isfinite(Rr_tilde_coef) && (Rr_tilde_coef = 0)
 
     objective =
         y_coef * sum(y) +
@@ -1892,7 +1895,7 @@ function declare_splitting_MILP(
                 y[exam, d] * exam_length(I.groups[exam[2]].s) for
                 exam in exams if I.λ[e, exam[2]];
                 init = 0,
-            ) + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
+            ) - I.τ_seq + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
             fill_rate * (
                 sum(I.α[e, l] for l in I.L[d]) + sum(
                     prod(I.α[e, l] for l in P) *
