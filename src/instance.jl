@@ -49,9 +49,9 @@ Base.@kwdef struct Instance
     S_stu::Vector{Set{Int}}
     U::Vector{Set{UnitRange{Int}}}
     J::Vector{Set{Int}}
-    L::Vector{Vector{Int}}
-    V::Vector{Vector{Int}}
-    Z::Vector{Set{Int}}
+    L::Vector{UnitRange{Int}}
+    V::Vector{UnitRange{Int}}
+    Z::Vector{UnitRange{Int}}
 
     groups::Vector{Group}
     room_type_data::Dict{String,Dict{String,Any}}
@@ -114,32 +114,43 @@ function read_instance(path::String)
     end
     n_l = length(timeslots_start_datetime)
 
-    L = Vector{Vector{Int}}([Vector{Int}()])
-    V = Vector{Vector{Int}}([Vector{Int}()])
-    Z = Vector{Set{Int}}([Set{Int}()])
+    L = Vector{UnitRange{Int}}()
+    curr_l_range = [1, 0]
+    V = Vector{UnitRange{Int}}()
+    curr_v_range = [0, -1]
+    Z = Vector{UnitRange{Int}}()
+    curr_z_range = [1, 0]
     day = Date(timeslots_start_datetime[1])
     week_start =
         Date(timeslots_start_datetime[1] - Day(dayofweek(timeslots_start_datetime[1]) - 1))
     for (l, datetime) in enumerate(timeslots_start_datetime)
         if Date(datetime) != day
-            push!(L, Vector{Int}())
-            push!(V, Vector{Int}())
+            push!(L, curr_l_range[1]:curr_l_range[2])
+            curr_l_range = [l, 0]
+            push!(V, curr_v_range[1]:curr_v_range[2])
+            curr_v_range = [0, -1]
             day = Date(datetime)
         end
         if Date(datetime - Day(dayofweek(datetime) - 1)) != week_start
-            push!(Z, Set{Int}())
+            push!(Z, curr_z_range[1]:curr_z_range[2])
+            curr_z_range = [l, 0]
             week_start = Date(datetime - Day(dayofweek(datetime) - 1))
         end
 
-        push!(L[end], l)
-        push!(Z[end], l)
+        curr_l_range[2] = l
+        curr_z_range[2] = l
         if (
             Time(dataset["general_parameters"]["lunch_time_window"][1]) <= Time(datetime) &&
             Time(dataset["general_parameters"]["lunch_time_window"][2]) > Time(datetime)
         )
-            push!(V[end], l)
+            curr_v_range[2] = l
+            (curr_v_range[1] <= 0) && (curr_v_range[1] = l)
         end
     end
+    # Add the last entries
+    push!(L, curr_l_range[1]:curr_l_range[2])
+    push!(V, curr_v_range[1]:curr_v_range[2])
+    push!(Z, curr_z_range[1]:curr_z_range[2])
     n_d = length(L)
     n_w = length(Z)
 
