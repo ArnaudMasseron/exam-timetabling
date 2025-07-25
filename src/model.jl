@@ -940,7 +940,7 @@ function declare_RSD_jl(I::Instance, model::Model)
             ],
             sum(
                 g[i, k, l+t] for k = 1:I.n_j if I.γ[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l);
+                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l);
                 init = 0,
             ) <=
             M(i, nu, d, l) *
@@ -1401,7 +1401,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             ],
             sum(
                 g[i, k, l+t] for k in valid_j if is_ij_valid[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l);
+                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l);
                 init = 0,
             ) <=
             M(i, nu, d, l) * (
@@ -1692,7 +1692,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
             ],
             sum(
                 x[i, k, l+t, m] for k = 1:I.n_j if I.γ[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.ν[I.groups[k].s]], I.L[d][end] - l),
+                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l),
                 m = 1:I.n_m if is_ijlm_valid[i, k, l+t, m];
                 init = 0,
             ) <=
