@@ -1,17 +1,17 @@
 # Load packages and source files
 using JuMP, Gurobi, JLD2
-repo_path = String(@__DIR__) * "/../"
-include(repo_path * "src/instance.jl")
-include(repo_path * "src/model.jl")
-include(repo_path * "src/solution.jl")
-include(repo_path * "src/utils.jl")
+repo_path = joinpath(@__DIR__, "../")
+include(joinpath(repo_path, "src/instance.jl"))
+include(joinpath(repo_path, "src/model.jl"))
+include(joinpath(repo_path, "src/solution.jl"))
+include(joinpath(repo_path * "src/utils.jl"))
 
 
 # ---------- USER SET PARAMETERS ---------- #
 # The following parameters must be set by the user
 # These are useless if the script is launched from the terminal
 
-instance_path = repo_path * "instances/" * "2024-2025_dataset_sampletiny_15min.json"
+instance_path = joinpath(repo_path, "instances/2024-2025_dataset_sampletiny_15min.json")
 
 n_splits = 4                # Number of sub-instances wanted
 time_limit_seconds = 60     # Maximum time limit for the whole solving process
@@ -44,7 +44,7 @@ end
 
 # Set solution saving parameters
 year, instance_type, time_step_min = get_instance_arguments(instance_path)
-save_dir = repo_path * "solutions/RSD_split/" # directory were data will be saved
+save_dir = joinpath(repo_path, "solutions/RSD_split/") # directory were data will be saved
 save_radical =
     "RSDsplit_" *
     "$(year)$(instance_type)_" *
@@ -92,26 +92,26 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
 )
 if save_debug
     save_with_dir(
-        save_dir * "debug/SPLIT_obj_evol_" * save_radical * ".jld2",
+        joinpath(save_dir, "debug/SPLIT_obj_evol_" * save_radical * ".jld2"),
         SPLIT_obj_evol,
     )
     save_with_dir(
-        save_dir * "debug/g_values_warmstart_" * save_radical * ".jld2",
+        joinpath(save_dir, "debug/g_values_warmstart_" * save_radical * ".jld2"),
         g_values_warmstart,
     )
     save_with_dir(
-        save_dir * "debug/completely_removed_exams_" * save_radical * ".jld2",
+        joinpath(save_dir, "debug/completely_removed_exams_" * save_radical * ".jld2"),
         completely_removed_exams,
     )
-    save_with_dir(save_dir * "debug/instance_" * save_radical * ".jld2", instance)
+    save_with_dir(joinpath(save_dir, "debug/instance_" * save_radical * ".jld2"), instance)
 end
 if save_solution
     save_with_dir(
-        save_dir * "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2",
+        joinpath(save_dir, "graphs/graph_data/SPLIT_obj_evol_" * save_radical * ".jld2"),
         SPLIT_obj_evol,
     )
     draw_SPLIT_objective_graph(
-        save_dir * "graphs/graph_SPLIT_" * save_radical * ".png",
+        joinpath(save_dir, "graphs/graph_SPLIT_" * save_radical * ".png"),
         SPLIT_obj_evol,
         nothing,
     )
@@ -169,19 +169,22 @@ for (split_id, SplitI) in enumerate(split_instances)
     end
 end
 if save_debug
-    save_with_dir(save_dir * "debug/f_values_" * save_radical * ".jld2", f_values)
+    save_with_dir(joinpath(save_dir, "debug/f_values_" * save_radical * ".jld2"), f_values)
     save_with_dir(
-        save_dir * "debug/RSD_jl_obj_evol_" * save_radical * ".jld2",
+        joinpath(save_dir, "debug/RSD_jl_obj_evol_" * save_radical * ".jld2"),
         RSD_jl_obj_evol,
     )
 end
 if save_solution
     save_with_dir(
-        save_dir * "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2",
+        joinpath(
+            save_dir,
+            "graphs/graph_data/RSD_jl_obj_evol_RSD_" * save_radical * ".jld2",
+        ),
         RSD_jl_obj_evol,
     )
     draw_RSD_jl_objective_graphs(
-        save_dir * "graphs/graph_RSD_jl_" * save_radical * ".png",
+        joinpath(save_dir, "graphs/graph_RSD_jl_" * save_radical * ".png"),
         RSD_jl_obj_evol,
         time_limit_one_split,
     )
@@ -217,7 +220,7 @@ let
     end
 end
 if save_debug
-    save_with_dir(save_dir * "debug/b_values_" * save_radical * ".jld2", b_values)
+    save_with_dir(joinpath(save_dir, "debug/b_values_" * save_radical * ".jld2"), b_values)
 end
 
 # Add the students, i.e. solve RSD_ijlm
@@ -264,19 +267,22 @@ let
     end
 end
 if save_debug
-    save_with_dir(save_dir * "debug/x_values_" * save_radical * ".jld2", x_values)
+    save_with_dir(joinpath(save_dir, "debug/x_values_" * save_radical * ".jld2"), x_values)
     save_with_dir(
-        save_dir * "debug/RSD_ijlm_obj_evol_" * save_radical * ".jld2",
+        joinpath(save_dir, "debug/RSD_ijlm_obj_evol_" * save_radical * ".jld2"),
         RSD_ijlm_obj_evol,
     )
 end
 if save_solution
     save_with_dir(
-        save_dir * "graphs/graph_data/RSD_ijlm_obj_evol_RSD_" * save_radical * ".jld2",
+        joinpath(
+            save_dir,
+            "graphs/graph_data/RSD_ijlm_obj_evol_RSD_" * save_radical * ".jld2",
+        ),
         RSD_ijlm_obj_evol,
     )
     draw_RSD_ijlm_objective_graphs(
-        save_dir * "graphs/graph_RSD_ijlm_" * save_radical * ".png",
+        joinpath(save_dir, "graphs/graph_RSD_ijlm_" * save_radical * ".png"),
         RSD_ijlm_obj_evol[1],
         (!isnothing(time_limit_seconds) ? time_limit_seconds / 10 : nothing),
     )
@@ -292,13 +298,16 @@ reorder_students_inside_series(instance, x_values)
 if save_solution
     println_dash("Start saving the solution")
 
-    save_with_dir(save_dir * "x_values/x_values_" * save_radical * ".jld2", x_values)
+    save_with_dir(
+        joinpath(save_dir, "x_values/x_values_" * save_radical * ".jld2"),
+        x_values,
+    )
     write_solution_json(
         instance,
         x_values,
         completely_removed_exams,
         sol_cost,
-        save_dir * "json/sol_" * save_radical * ".json",
+        joinpath(save_dir, "json/sol_" * save_radical * ".json"),
     )
 
     println_dash("Solution saved")
