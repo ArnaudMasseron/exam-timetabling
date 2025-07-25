@@ -32,11 +32,10 @@ modalities_reschedule = nothing
 # If solve_RSD_split.jl is launched from the terminal with some arguments
 # then load the terminal arguments instead
 if !isempty(ARGS)
-    @assert length(ARGS) == 4 "Incorrect amount of arguments given"
-    instance_path = string(ARGS[1])
-    n_splits = parse(Int, ARGS[2])
-    time_limit_seconds = parse(Int, ARGS[3])
-    fill_rate = parse(Float64, ARGS[4])
+    @assert length(ARGS) == 3 "Incorrect amount of arguments given"
+    n_splits = parse(Int, ARGS[1])
+    time_limit_seconds = parse(Int, ARGS[2])
+    fill_rate = parse(Float64, ARGS[3])
     save_debug = true
     save_solution = true
 end
