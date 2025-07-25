@@ -106,7 +106,7 @@ function read_instance(path::String)
         end
     end
     sort(timeslots_start_datetime)
-    for a = 1:length(timeslots_start_datetime)-1
+    for a = 1:(length(timeslots_start_datetime)-1)
         @assert(
             timeslots_start_datetime[a+1] - timeslots_start_datetime[a] >= Δ_l,
             "BAD DATASET: There must be no duplicates in the exam time windows"
@@ -374,7 +374,7 @@ function read_instance(path::String)
 end
 
 function check_infeasible_basic(I::Instance; fill_rate = 1)
-    #= Perform basic preliminary tests in order to see if an instance is infeasible or not =#
+    # Perform basic preliminary tests in order to see if an instance is infeasible or not
     pb_constraints = Vector{String}()
 
     # Feasible amount of students for exams with multiple simultaneous students
@@ -536,8 +536,8 @@ function _create_split_instances(
     end
 
     κ_splits = [
-        Int(round(sum(z_values[(e, d)] for d in days_split[split]))) for e = 1:I.n_e,
-        split = 1:n_splits
+        Int(round(sum(z_values[(e, d)] for d in days_split[split]))) for
+        e = 1:I.n_e, split = 1:n_splits
     ]
 
     # Create the split instances vector
@@ -585,7 +585,6 @@ function _find_problematic_exams(RSD_jl_split_warm::Model)
     return pb_exams
 end
 
-include(String(@__DIR__) * "/../src/utils.jl")
 function split_instance(
     I::Instance,
     n_splits::Int,
@@ -596,8 +595,8 @@ function split_instance(
     mip_gap_SPLIT = 0.05,
     n_max_tries = 1,
     print_pb_constraints = false,
-    frozen_ijlm = nothing,
     start_x_values = nothing,
+    frozen_ijlm = nothing,
 )
     #= 
     Split the instance into multiple subinstances until a feasible split has been found.
@@ -611,7 +610,12 @@ function split_instance(
     [input] time_limit_warmstart: time limit in seconds for each warmstart resolution
     [input] time_limit_SPLIT: time limit in seconds for each SPLIT model resolution
     [input] mip_gap_SPLIT: goal gap for each SPLIT model resolution
-    [input] : maximum number of times where the splitting MILP can be solved
+    [input] n_max_tries : maximum number of times where the splitting MILP can be solved
+    [input] print_pb_constraints : if tru then problematic constraints in infeasible 
+            models are printed
+    [input] start_x_values : optional starting solution
+    [input] frozen_ijlm : indexes ijlm of values in start_x_values that need to remain unchanged
+
 
     Return value: (split_instances, g_values_warmstart) 
     split_instances: Vector{SplitInstance} containing the different subsinstances
@@ -650,10 +654,11 @@ function split_instance(
 
         # Provide a starting solution if available
         if !isnothing(start_x_values)
-            for (((i, j), d), var) in SPLIT_model[:y].data
+            for exam in exams, d = 1:I.n_d
+                i, j = exam
                 scheduled_in_start =
                     sum(start_x_values[i, j, l, m] for l in I.L[d], m = 1:I.n_m) > 0
-                set_start_value(var, Int(scheduled_in_start))
+                set_start_value(SPLIT_model[:y][exam, d], Int(scheduled_in_start))
             end
         end
 
@@ -661,7 +666,7 @@ function split_instance(
         if !isnothing(frozen_ijlm)
             days_start = [I.L[d][1] for d = 1:I.n_d]
             @assert issorted(days_start)
-            get_day(l) = searchsortedfirst(days_start, l)
+            get_day(l) = searchsortedlast(days_start, l)
 
             for (i, j, l, m) in frozen_ijlm
                 d = get_day(l)
@@ -678,11 +683,13 @@ function split_instance(
     completely_removed_exams = Set{Tuple{Int,Int}}()
     try_id = 1
     while !feasible_splits_found && try_id <= n_max_tries
+        println_dash("Solving SPLIT model try n°$try_id")
+
         y_values = nothing
         z_values = nothing
         if n_splits == 1
             # If n_splits == 1 there is no need to solve the splitting MILP
-            y_values = Dict((exam, 1) => Int((d == 1)) for exam in exams, d = 1:I.n_d)
+            y_values = Dict((exam, d) => Int((d == 1)) for exam in exams, d = 1:I.n_d)
             z_values = Dict((e, d) => (d == 1) * I.κ[e] for e = 1:I.n_e, d = 1:I.n_d)
         else
             # Warmstart
@@ -732,6 +739,8 @@ function split_instance(
         g_values_warmstart = zeros(Bool, I.n_i, I.n_j, I.n_l)
         feasible_splits_found = true
         for (split, SplitI) in enumerate(split_instances)
+            println_dash("Warmstarting RSD_jl on split n°$split")
+
             RSD_jl_split_warm = Model(Gurobi.Optimizer)
             declare_RSD_jl_split(SplitI, RSD_jl_split_warm)
             @objective(RSD_jl_split_warm, Min, 0)
@@ -753,8 +762,9 @@ function split_instance(
             # Freeze certain exams if needed
             if !isnothing(frozen_ijlm)
                 for (i, j, l, m) in frozen_ijlm
-                    (!((i, j) in completely_removed_exams)) &&
+                    if (i, j) in SplitI.exams && !((i, j) in completely_removed_exams)
                         fix(RSD_jl_split_warm[:g][i, j, l], 1; force = true)
+                    end
                 end
             end
 
@@ -763,6 +773,7 @@ function split_instance(
             # If the split is infeasible then find the exams that cause problem
             if !has_values(RSD_jl_split_warm)
                 if n_splits == 1
+                    print_pb_constraints && print_constraint_conflicts(RSD_jl_split_warm)
                     error(
                         "Couldn't warmstart the RSD_jl submodel.
                   Either the instance is infeasible or the warmstart time limit is too low.",
@@ -803,8 +814,10 @@ function split_instance(
 
                     if !isnothing(frozen_ijlm)
                         for (i, j, l, m) in frozen_ijlm
-                            (!((i, j) in completely_removed_exams)) &&
+                            if (i, j) in SplitI.exams &&
+                               !((i, j) in completely_removed_exams)
                                 fix(RSD_jl_split_warm[:g][i, j, l], 1; force = true)
+                            end
                         end
                     end
 

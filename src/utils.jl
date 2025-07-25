@@ -1,3 +1,5 @@
+using JLD2, JuMP
+
 # Save function that creates the folder if it doesnt exist
 function save_with_dir(path::String, data)
     # If the directory doesnt exist then create it
@@ -148,7 +150,7 @@ function get_instance_arguments(instance_path::String)
     instance_arguments = split(instance_name, "_")
     year = instance_arguments[1]
     instance_type = instance_arguments[3]
-    time_step_min = parse(Int, instance_arguments[4][1:end-8])
+    time_step_min = parse(Int, instance_arguments[4][1:(end-8)])
 
     return year, instance_type, time_step_min
 end
@@ -167,7 +169,7 @@ function get_frozen_exams(I::Instance, modalities_reschedule, start_x_values::Ar
 
     exams_reschedule = Set{Tuple{Int,Int}}()
     for modality in modalities_reschedule
-        exam_id = findfirst(x -> x["modality"] == modality, I.dataset["exams"])
+        exam_id = findfirst(x -> x["modality"] == string(modality), I.dataset["exams"])
         i = I.dataset["exams"][exam_id]["student_id"]
         j = I.dataset["exams"][exam_id]["group_id"]
         push!(exams_reschedule, (i, j))
@@ -175,7 +177,7 @@ function get_frozen_exams(I::Instance, modalities_reschedule, start_x_values::Ar
 
     # Allow the exams of dummy students to be rescheduled
     dummy_exams = Set{Tuple{Int,Int}}()
-    dummy_class_id = findfirst(x -> contain(x["acronym"], "dummy"), I.dataset["classes"])
+    dummy_class_id = findfirst(x -> occursin(x["acronym"], "dummy"), I.dataset["classes"])
     if !isnothing(dummy_class_id)
         dummy_students =
             findall(x -> x["class_id"] == dummy_class_id, I.dataset["students"])
@@ -188,9 +190,9 @@ function get_frozen_exams(I::Instance, modalities_reschedule, start_x_values::Ar
     # Get the ijlm indexes in start_x_values coreresponding to the frozen exams
     frozen_ijlm = Set{NTuple{4,Int}}()
     for (i, j) in frozen_exams
-        cart_id = findfirst(identity, view(x_values, i, j, :, :))
+        cart_id = findfirst(identity, view(start_x_values,i,j,:,:))
         if !isnothing(cart_id)
-            i, j = cart_id.I
+            l, m = cart_id.I
             push!(frozen_ijlm, (i, j, l, m))
         end
     end

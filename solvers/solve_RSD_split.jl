@@ -4,7 +4,7 @@ repo_path = joinpath(@__DIR__, "../")
 include(joinpath(repo_path, "src/instance.jl"))
 include(joinpath(repo_path, "src/model.jl"))
 include(joinpath(repo_path, "src/solution.jl"))
-include(joinpath(repo_path * "src/utils.jl"))
+include(joinpath(repo_path, "src/utils.jl"))
 
 
 # ---------- USER SET PARAMETERS ---------- #
@@ -22,7 +22,6 @@ save_solution = false       # Save solution files
 # Path toward a starting solution's x_values
 # If one doesn't want to provide a starting solution, then this should be set to nothing
 start_x_values_path = nothing
-
 # Modalities of the exams that need to be rescheduled
 # Only relevent if a starting solution is provided
 # If equal to nothing, then all exams can be rescheduled
@@ -31,7 +30,7 @@ modalities_reschedule = nothing
 
 
 # If solve_RSD_split.jl is launched from the terminal with some arguments
-# load the terminal arguments instead
+# then load the terminal arguments instead
 if !isempty(ARGS)
     @assert length(ARGS) == 4 "Incorrect amount of arguments given"
     instance_path = string(ARGS[1])
@@ -83,12 +82,12 @@ split_instances, g_values_warmstart, completely_removed_exams = split_instance(
     instance,
     n_splits,
     SPLIT_obj_evol;
-    fill_rate = fill_rate,
+    fill_rate,
     time_limit_warmstart = time_limit_one_split / 5,
     time_limit_SPLIT = time_limit_seconds / 5,
-    n_max_tries = n_max_tries,
-    frozen_ijlm = frozen_ijlm,
-    start_x_values = start_x_values,
+    n_max_tries,
+    frozen_ijlm,
+    start_x_values,
 )
 if save_debug
     save_with_dir(
@@ -137,8 +136,9 @@ for (split_id, SplitI) in enumerate(split_instances)
     # Freeze certain exams if needed
     if !isnothing(frozen_ijlm)
         for (i, j, l, m) in frozen_ijlm
-            (!((i, j) in completely_removed_exams)) &&
+            if (i, j) in SplitI.exams && !((i, j) in completely_removed_exams)
                 fix(RSD_jl_split[:g][i, j, l], 1; force = true)
+            end
         end
     end
 
