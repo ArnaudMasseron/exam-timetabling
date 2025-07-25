@@ -860,9 +860,11 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[(room_type, dict) in I.room_type_data, l = 1:I.n_l],
-        sum(h[j, l] for s in dict["subjects"] for j in I.J[s]; init = 0) <=
-        sum(I.δ[m, l] for m in dict["rooms"])
+        room_occupation_2[room_type in keys(I.room_type_data), l = 1:I.n_l],
+        sum(
+            h[j, l] for s in I.room_type_data[room_type]["subjects"] for j in I.J[s];
+            init = 0,
+        ) <= sum(I.δ[m, l] for m in I.room_type_data[room_type]["rooms"])
     )
 
 
@@ -1310,9 +1312,12 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[(room_type, dict) in I.room_type_data, l = l_range],
-        sum(h[j, l] for s in dict["subjects"] for j in I.J[s] if is_j_valid[j]; init = 0) <=
-        sum(I.δ[m, l] for m in dict["rooms"])
+        room_occupation_2[room_type in keys(I.room_type_data), l = l_range],
+        sum(
+            h[j, l] for s in I.room_type_data[room_type]["subjects"] for
+            j in I.J[s] if is_j_valid[j];
+            init = 0,
+        ) <= sum(I.δ[m, l] for m in I.room_type_data[room_type]["rooms"])
     )
 
 
@@ -1930,12 +1935,14 @@ function declare_splitting_MILP(
     let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
         @constraint(
             model,
-            rooms_enough_time[(room_type, dict) in I.room_type_data, d = 1:I.n_d],
+            rooms_enough_time[room_type in keys(I.room_type_data), d = 1:I.n_d],
             sum(
-                y[exam, d] * exam_length(I.groups[exam[2]].s) for
-                exam in exams if I.groups[exam[2]].s in dict["subjects"];
+                y[exam, d] * exam_length(I.groups[exam[2]].s) for exam in exams if
+                I.groups[exam[2]].s in I.room_type_data[room_type]["subjects"];
                 init = 0,
-            ) <= fill_rate * sum(I.δ[m, l] for l in I.L[d], m in dict["rooms"])
+            ) <=
+            fill_rate *
+            sum(I.δ[m, l] for l in I.L[d], m in I.room_type_data[room_type]["rooms"])
         )
     end
 
