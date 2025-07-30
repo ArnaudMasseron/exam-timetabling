@@ -626,6 +626,8 @@ function split_instance(
     @assert n_splits <= I.n_d "Can't have more splits than the number of days"
     @assert 0 < fill_rate <= 1 "The filling rate must be in (0, 1]"
 
+    (n_splits == 1) && (n_max_tries = 1)
+
     # Initialize some data
     days_split_size = zeros(Int, n_splits)
     for d = 1:I.n_d
@@ -772,14 +774,6 @@ function split_instance(
 
             # If the split is infeasible then find the exams that cause problem
             if !has_values(RSD_jl_split_warm)
-                if n_splits == 1
-                    print_pb_constraints && print_constraint_conflicts(RSD_jl_split_warm)
-                    error(
-                        "Couldn't warmstart the RSD_jl submodel.
-                  Either the instance is infeasible or the warmstart time limit is too low.",
-                    )
-                end
-
                 feasible_splits_found = false
 
                 if termination_status(RSD_jl_split_warm) in
@@ -835,7 +829,8 @@ function split_instance(
                     end
 
                     optimize!(RSD_jl_split_warm)
-                    @assert has_values(RSD_jl_split_warm)
+                    @assert has_values(RSD_jl_split_warm) "Couldn't warmstart the RSD_jl submodel" *
+                                                          "The warmstart time limit might be too low."
                 else
                     for exam in pb_exams
                         if !haskey(banned_exams, exam)
