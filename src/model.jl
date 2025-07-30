@@ -4,7 +4,7 @@ function declare_CM(I::Instance, model::Model)
     # --- Main decision variables --- #
     @variable(
         model,
-        x[i = 1:I.n_i, j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; I.γ[i, j]],
+        x[i=1:I.n_i, j=1:I.n_j, l=1:I.n_l, m=1:I.n_m; I.γ[i, j]],
         binary = true
     )
 
@@ -12,8 +12,8 @@ function declare_CM(I::Instance, model::Model)
     # Student availability
     let
         sum_ids = Set{Tuple{Int,Int,Int}}()
-        for i = 1:I.n_i, s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
-            RHS = prod(I.θ[i, l-I.μ[s]:l+I.ν[s]-1])
+        for i = 1:I.n_i, s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))]
+            RHS = prod(I.θ[i, (l-I.μ[s]):(l+I.ν[s]-1)])
             if !RHS
                 valid_j = [j for j in I.J[s] if I.γ[i, j]]
                 fix.(x[i, valid_j, l, 1:I.n_m], 0; force = true)
@@ -32,7 +32,7 @@ function declare_CM(I::Instance, model::Model)
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i = 1:I.n_i, l = 1:I.n_l],
+        student_one_exam_1[i=1:I.n_i, l=1:I.n_l],
         sum(x[i, j, l, m] for j = 1:I.n_j if I.γ[i, j] for m = 1:I.n_m; init = 0) <= 1
     )
 
@@ -41,17 +41,16 @@ function declare_CM(I::Instance, model::Model)
         μ_max_stu = [maximum(I.μ[s] for s in I.S_stu[i]) for i = 1:I.n_i]
         ν_min_stu = [minimum(I.ν[s] for s in I.S_stu[i]) for i = 1:I.n_i]
         M = [
-            ceil((I.ν[s] - 1 + I.τ_stu + μ_max_stu[i]) / ν_min_stu[i]) for s = 1:I.n_s,
-            i = 1:I.n_i
+            ceil((I.ν[s] - 1 + I.τ_stu + μ_max_stu[i]) / ν_min_stu[i]) for
+            s = 1:I.n_s, i = 1:I.n_i
         ]
 
         @constraint(
             model,
-            student_one_exam_2[i = 1:I.n_i, s = 1:I.n_s, d = 1:I.n_d, l in I.L[d]],
+            student_one_exam_2[i=1:I.n_i, s=1:I.n_s, d=1:I.n_d, l in I.L[d]],
             sum(
                 x[i, k, l+t, m] for k = 1:I.n_j if I.γ[i, k] for
-                t = 1:min(I.ν[s] - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l),
-                m = 1:I.n_m;
+                t = 1:min(I.ν[s]-1+I.τ_stu+I.μ[I.groups[k].s], I.L[d][end]-l), m = 1:I.n_m;
                 init = 0,
             ) <=
             M[s, i] * (
@@ -66,7 +65,7 @@ function declare_CM(I::Instance, model::Model)
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        student_max_exams[i=1:I.n_i, d=1:I.n_d],
         sum(
             x[i, j, l, m] for j = 1:I.n_j if I.γ[i, j] for l in I.L[d], m = 1:I.n_m;
             init = 0,
@@ -74,10 +73,10 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Student harmonious exams
-    @variable(model, y[i = 1:I.n_i] >= 0)
+    @variable(model, y[i=1:I.n_i] >= 0)
     @constraint(
         model,
-        student_harmonious_exams[i = 1:I.n_i, w = 1:I.n_w],
+        student_harmonious_exams[i=1:I.n_i, w=1:I.n_w],
         sum(
             x[i, j, l, m] for j = 1:I.n_j if I.γ[i, j] for l in I.Z[w], m = 1:I.n_m;
             init = 0,
@@ -94,9 +93,9 @@ function declare_CM(I::Instance, model::Model)
     @variable(
         model,
         R_tilde[
-            j = 1:I.n_j,
-            c = 1:I.n_c,
-            d = 1:I.n_d;
+            j=1:I.n_j,
+            c=1:I.n_c,
+            d=1:I.n_d;
             is_j_multi_class[j] && is_jc_valid[j, c],
         ] <= I.L[d][end]
     )
@@ -105,7 +104,7 @@ function declare_CM(I::Instance, model::Model)
         student_same_class_together_1[
             j in (j for j = 1:I.n_j if is_j_multi_class[j]),
             i in (i for i = 1:I.n_i if I.γ[i, j]),
-            d = 1:I.n_d,
+            d=1:I.n_d,
             l in I.L[d],
         ],
         l + (I.L[d][1] - l) * (1 - sum(x[i, j, l, m] for m = 1:I.n_m)) <=
@@ -116,9 +115,9 @@ function declare_CM(I::Instance, model::Model)
     @variable(
         model,
         r_tilde[
-            j = 1:I.n_j,
-            c = 1:I.n_c,
-            d = 1:I.n_d;
+            j=1:I.n_j,
+            c=1:I.n_c,
+            d=1:I.n_d;
             is_j_multi_class[j] && is_jc_valid[j, c],
         ] >= I.L[d][1]
     )
@@ -127,7 +126,7 @@ function declare_CM(I::Instance, model::Model)
         student_same_class_together_2[
             j in (j for j = 1:I.n_j if is_j_multi_class[j]),
             i in (i for i = 1:I.n_i if I.γ[i, j]),
-            d = 1:I.n_d,
+            d=1:I.n_d,
             l in I.L[d],
         ],
         r_tilde[j, I.dataset["students"][i]["class_id"], d] <=
@@ -140,7 +139,7 @@ function declare_CM(I::Instance, model::Model)
         student_same_class_together_3[
             j in (j for j = 1:I.n_j if is_j_multi_class[j]),
             c in (c for c = 1:I.n_c if is_jc_valid[j, c]),
-            d = 1:I.n_d,
+            d=1:I.n_d,
         ],
         r_tilde[j, c, d] <= R_tilde[j, c, d]
     )
@@ -149,9 +148,10 @@ function declare_CM(I::Instance, model::Model)
     # Group availability
     let
         sum_ids = Set{Tuple{Int,Int}}()
-        for s = 1:I.n_s, j in I.J[s], d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+        for s = 1:I.n_s, j in I.J[s], d = 1:I.n_d, l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))]
 
-            one_alpha_null = !prod(I.α[e, l+t] for e in I.groups[j].e, t = -I.μ[s]:I.ν[s]-1)
+            one_alpha_null =
+                !prod(I.α[e, l+t] for e in I.groups[j].e, t = (-I.μ[s]):(I.ν[s]-1))
             if one_alpha_null
                 valid_i = [i for i = 1:I.n_i if I.γ[i, j]]
                 fix.(x[valid_i, j, l, 1:I.n_m], 0; force = true)
@@ -167,7 +167,7 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Examiner obligation cancelation
-    @variable(model, q[e = 1:I.n_e, P in I.U[e]]; binary = true)
+    @variable(model, q[e=1:I.n_e, P in I.U[e]]; binary = true)
     let ν_min_e = [minimum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
         M(e, P) =
             length(P) * ceil(
@@ -179,18 +179,18 @@ function declare_CM(I::Instance, model::Model)
         @assert issorted(days_begginings)
         get_t_range(l, s) = begin
             d = searchsortedlast(days_begginings, l)
-            return max(-I.μ[s], l - I.L[d][end]):min(I.ν[s] - 1, l - I.L[d][1])
+            return max(-I.μ[s], l-I.L[d][end]):min(I.ν[s]-1, l-I.L[d][1])
         end
         left_sum(e, P) = sum(
             x[i, j, l-t, m] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for
-            i = 1:I.n_i if I.γ[i, j] for l in P for m = 1:I.n_m,
-            t in get_t_range(l, I.groups[j].s);
+            i = 1:I.n_i if I.γ[i, j] for l in P for
+            m = 1:I.n_m, t in get_t_range(l, I.groups[j].s);
             init = 0,
         )
 
         @constraint(
             model,
-            examiner_obligation_cancelation[e = 1:I.n_e, P in I.U[e]],
+            examiner_obligation_cancelation[e=1:I.n_e, P in I.U[e]],
             prod(I.α[e, P]) * left_sum(e, P) <= M(e, P) * q[e, P]
         )
     end
@@ -199,13 +199,13 @@ function declare_CM(I::Instance, model::Model)
     @constraint(
         model,
         group_one_exam[
-            s in (s for s = 1:I.n_s if I.ν[s] > 1),
+            s in (s for s = 1:I.n_s if I.ν[s]>1),
             j in I.J[s],
-            d = 1:I.n_d,
-            l in I.L[d][1:end-(I.ν[s]-1)],
+            d=1:I.n_d,
+            l in I.L[d][1:(end-(I.ν[s]-1))],
         ],
         sum(
-            x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t = 1:I.ν[s]-1, m = 1:I.n_m;
+            x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for t = 1:(I.ν[s]-1), m = 1:I.n_m;
             init = 0,
         ) / I.η[s] <=
         1 -
@@ -216,7 +216,7 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Examiner lunch break 1
-    @variable(model, b[e = 1:I.n_e, l in vcat(I.V...)], binary = true)
+    @variable(model, b[e=1:I.n_e, l in vcat(I.V...)], binary = true)
     let
         μ_max_e = [maximum(I.μ[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
         ν_max_e = [maximum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
@@ -225,14 +225,15 @@ function declare_CM(I::Instance, model::Model)
 
         @constraint(
             model,
-            examiner_lunch_break_1[e = 1:I.n_e, d = 1:I.n_d, l in I.V[d]],
+            examiner_lunch_break_1[e=1:I.n_e, d=1:I.n_d, l in I.V[d]],
             sum(
                 x[i, j, l+t, m] / I.η[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j] for
                 i = 1:I.n_i if I.γ[i, j] for t =
-                    max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
-                        I.L[d][end] - l,
-                        I.μ[I.groups[j].s] + I.τ_lun - 1,
-                    ), m = 1:I.n_m;
+                    max(
+                        I.L[d][1]-l,
+                        -I.ν[I.groups[j].s]+1,
+                    ):min(I.L[d][end]-l, I.μ[I.groups[j].s]+I.τ_lun-1),
+                m = 1:I.n_m;
                 init = 0,
             ) + sum(
                 (l <= l_tilde <= min(I.L[d][end], l + I.τ_lun - 1)) * (1 - q[e, P]) for
@@ -245,7 +246,7 @@ function declare_CM(I::Instance, model::Model)
     # Examiner lunch break 2
     @constraint(
         model,
-        examiner_lunch_break_2[e = 1:I.n_e, d = 1:I.n_d],
+        examiner_lunch_break_2[e=1:I.n_e, d=1:I.n_d],
         sum(b[e, l] for l in I.V[d]; init = 0) >= 1
     )
 
@@ -263,14 +264,12 @@ function declare_CM(I::Instance, model::Model)
 
         @constraint(
             model,
-            group_switch_break[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
+            group_switch_break[j=1:I.n_j, d=1:I.n_d, l in I.L[d]],
             sum(
                 x[i, k, l+t, m] / I.η[I.groups[k].s] for k = 1:I.n_j if k != j && I.σ[j, k]
-                for i = 1:I.n_i if I.γ[i, k] for t =
-                    0:min(
-                        I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
-                        I.L[d][end] - l,
-                    ) for m = 1:I.n_m;
+                for i = 1:I.n_i if I.γ[i, k] for
+                t = 0:min(I.ν[I.groups[j].s]-1+I.τ_swi+I.μ[I.groups[k].s], I.L[d][end]-l)
+                for m = 1:I.n_m;
                 init = 0,
             ) <=
             M[j] * (
@@ -282,10 +281,10 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Examiner max days 1
-    @variable(model, v[e = 1:I.n_e, d = 1:I.n_d], binary = true)
+    @variable(model, v[e=1:I.n_e, d=1:I.n_d], binary = true)
     @constraint(
         model,
-        examiner_max_days_1_and_max_exams[e = 1:I.n_e, d = 1:I.n_d],
+        examiner_max_days_1_and_max_exams[e=1:I.n_e, d=1:I.n_d],
         sum(
             x[i, j, l, m] for j = 1:I.n_j if I.λ[e, j] for i = 1:I.n_i if I.γ[i, j] for
             l in I.L[d], m = 1:I.n_m;
@@ -294,10 +293,10 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Examiner max days 2 and 3
-    @variable(model, w[e = 1:I.n_e] >= 0)
+    @variable(model, w[e=1:I.n_e] >= 0)
     @constraint(
         model,
-        examiner_max_days_2[e = 1:I.n_e],
+        examiner_max_days_2[e=1:I.n_e],
         (1 + w[e]) .* [-1, 1] .<= [-sum(v[e, d] for d = 1:I.n_d), I.κ[e]]
     )
 
@@ -307,14 +306,11 @@ function declare_CM(I::Instance, model::Model)
 
         @constraint(
             model,
-            room_switch_break[j in 1:I.n_j, d = 1:I.n_d, l in I.L[d], m = 1:I.n_m],
+            room_switch_break[j in 1:I.n_j, d=1:I.n_d, l in I.L[d], m=1:I.n_m],
             sum(
                 x[i, j, l+I.ν[I.groups[j].s]+t, m_tilde] for
-                m_tilde = 1:I.n_m if m_tilde != m for i = 1:I.n_i if I.γ[i, j] for t =
-                    0:min(
-                        I.L[d][end] - l - I.ν[I.groups[j].s],
-                        I.τ_room + I.μ[I.groups[j].s] - 1,
-                    );
+                m_tilde = 1:I.n_m if m_tilde != m for i = 1:I.n_i if I.γ[i, j] for
+                t = 0:min(I.L[d][end]-l-I.ν[I.groups[j].s], I.τ_room+I.μ[I.groups[j].s]-1);
                 init = 0,
             ) / I.η[I.groups[j].s] <=
             M(I.groups[j].s) * (
@@ -328,10 +324,10 @@ function declare_CM(I::Instance, model::Model)
     end
 
     # Exam grouped 1
-    @variable(model, R[e = 1:I.n_e, d = 1:I.n_d])
+    @variable(model, R[e=1:I.n_e, d=1:I.n_d])
     @constraint(
         model,
-        exam_grouped_1[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        exam_grouped_1[j=1:I.n_j, e in I.groups[j].e, d=1:I.n_d, l in I.L[d]],
         R[e, d] >=
         l +
         (I.L[d][1] - l) * (
@@ -342,10 +338,10 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Exam grouped 2
-    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d])
+    @variable(model, r[e=1:I.n_e, d=1:I.n_d])
     @constraint(
         model,
-        exam_grouped_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        exam_grouped_2[j=1:I.n_j, e in I.groups[j].e, d=1:I.n_d, l in I.L[d]],
         r[e, d] <=
         l +
         (I.L[d][end] - l) * (
@@ -356,15 +352,15 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Exam grouped 3
-    @constraint(model, exam_grouped_3[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
+    @constraint(model, exam_grouped_3[e=1:I.n_e, d=1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Room related constraints --- #
     # Room availability
     let
         sum_ids = Set{Tuple{Int,Int,Int}}()
-        for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)], m = 1:I.n_m
-            RHS = I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
+        for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))], m = 1:I.n_m
+            RHS = I.ψ[m, s] * prod(I.δ[m, (l-I.μ[s]):(l+I.ν[s]-1)])
 
             if !RHS
                 fix.(
@@ -393,15 +389,15 @@ function declare_CM(I::Instance, model::Model)
         @constraint(
             model,
             room_group_occupation[
-                j = 1:I.n_j,
+                j=1:I.n_j,
                 k in setdiff(1:I.n_j, [j]),
-                d = 1:I.n_d,
+                d=1:I.n_d,
                 l in I.L[d],
-                m = 1:I.n_m,
+                m=1:I.n_m,
             ],
             sum(
                 x[i, k, l+t, m] for i = 1:I.n_i if I.γ[i, k] for
-                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s));
+                t = 0:min(I.L[d][end]-l, a(I.groups[j].s, I.groups[k].s));
                 init = 0,
             ) / I.η[I.groups[k].s] <=
             M(I.groups[j].s, I.groups[k].s) * (
@@ -417,15 +413,15 @@ function declare_CM(I::Instance, model::Model)
     # Exam needed
     @constraint(
         model,
-        exam_needed[j = 1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
+        exam_needed[j=1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
         sum(x[i, j, l, m] for l = 1:I.n_l, m = 1:I.n_m; init = 0) == 1
     )
 
     # Exam student number
-    @variable(model, p[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m], binary = true)
+    @variable(model, p[j=1:I.n_j, l=1:I.n_l, m=1:I.n_m], binary = true)
     @constraint(
         model,
-        exam_student_number[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m],
+        exam_student_number[j=1:I.n_j, l=1:I.n_l, m=1:I.n_m],
         sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j]; init = 0) ==
         I.η[I.groups[j].s] * p[j, l, m]
     )
@@ -434,7 +430,7 @@ function declare_CM(I::Instance, model::Model)
     fix.(
         [
             x[i, j, l, m] for i = 1:I.n_i, j = 1:I.n_j if I.γ[i, j] for d = 1:I.n_d for
-            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][end-I.ν[I.groups[j].s]-1:end]),
+            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][(end-I.ν[I.groups[j].s]-1):end]),
             m = 1:I.n_m
         ],
         0;
@@ -442,18 +438,18 @@ function declare_CM(I::Instance, model::Model)
     )
 
     # Exam continuity 3
-    @variable(model, z[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m] >= 0)
+    @variable(model, z[j=1:I.n_j, l=1:I.n_l, m=1:I.n_m] >= 0)
 
     # Exam continuity 1
-    @variable(model, z_tilde[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m], binary = true)
+    @variable(model, z_tilde[j=1:I.n_j, l=1:I.n_l, m=1:I.n_m], binary = true)
     let M(j) = I.ρ[I.groups[j].s]
         @constraint(
             model,
             exam_continuity_1_1[
                 j in 1:I.n_j,
-                d = 1:I.n_d,
-                l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
-                m = 1:I.n_m,
+                d=1:I.n_d,
+                l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
+                m=1:I.n_m,
             ],
             I.ρ[I.groups[j].s] - sum(
                 x[i, j, l-t, m] for i = 1:I.n_i if I.γ[i, j] for
@@ -466,9 +462,9 @@ function declare_CM(I::Instance, model::Model)
         model,
         exam_continuity_1_2[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
-            m = 1:I.n_m,
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
+            m=1:I.n_m,
         ],
         sum(x[i, j, l-I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j]; init = 0) /
         I.η[I.groups[j].s] <=
@@ -482,9 +478,9 @@ function declare_CM(I::Instance, model::Model)
         model,
         exam_continuity_2[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ν[I.groups[j].s]:I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]],
-            m = 1:I.n_m,
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ν[I.groups[j].s]):(I.ρ[I.groups[j].s]*I.ν[I.groups[j].s])],
+            m=1:I.n_m,
         ],
         sum(x[i, j, l-I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j]; init = 0) <=
         sum(x[i, j, l, m] for i = 1:I.n_i if I.γ[i, j]; init = 0) +
@@ -498,14 +494,13 @@ function declare_CM(I::Instance, model::Model)
         @constraint(
             model,
             exam_break_min_duration[
-                j = 1:I.n_j,
-                d = 1:I.n_d,
-                l in I.L[d][1+I.ν[I.groups[j].s]:end],
+                j=1:I.n_j,
+                d=1:I.n_d,
+                l in I.L[d][(1+I.ν[I.groups[j].s]):end],
             ],
             sum(
                 x[i, j, l+t, m] for i = 1:I.n_i if I.γ[i, j] for
-                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]) - 1),
-                m = 1:I.n_m;
+                t = 0:min(I.L[d][end]-l, max(I.τ_seq, I.μ[I.groups[j].s])-1), m = 1:I.n_m;
                 init = 0,
             ) / I.η[I.groups[j].s] <=
             M[I.groups[j].s] * (
@@ -523,14 +518,14 @@ function declare_CM(I::Instance, model::Model)
         model,
         exam_break_series_end[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         sum(x[i, j, l, m] for i = 1:I.n_i, m = 1:I.n_m) / I.η[I.groups[j].s] <=
         I.ρ[I.groups[j].s] -
         sum(
-            x[i, j, l-a*I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j] for m = 1:I.n_m,
-            a = 1:I.ρ[I.groups[j].s];
+            x[i, j, l-a*I.ν[I.groups[j].s], m] for i = 1:I.n_i if I.γ[i, j] for
+            m = 1:I.n_m, a = 1:I.ρ[I.groups[j].s];
             init = 0,
         ) / I.η[I.groups[j].s]
     )
@@ -587,19 +582,20 @@ end
 # --- RSD models --- #
 function declare_RSD_jl(I::Instance, model::Model)
     # --- Main decision variables --- #
-    @variable(model, f[j = 1:I.n_j, l = 1:I.n_l], binary = true)
+    @variable(model, f[j=1:I.n_j, l=1:I.n_l], binary = true)
 
 
     # --- Examiner related constraints --- #
     # Group availability
-    @variable(model, 0 <= q[e = 1:I.n_e, l = 1:I.n_l] <= 1)
+    @variable(model, 0 <= q[e=1:I.n_e, l=1:I.n_l] <= 1)
     let
-        M(j, s) = length(I.groups[j].e) * length(-I.μ[s]:I.ν[s]-1)
+        M(j, s) = length(I.groups[j].e) * length((-I.μ[s]):(I.ν[s]-1))
 
         sum_ids = Set{Tuple{Int,Int}}()
-        for s = 1:I.n_s, j in I.J[s], d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+        for s = 1:I.n_s, j in I.J[s], d = 1:I.n_d, l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))]
 
-            one_alpha_null = !prod(I.α[e, l+t] for e in I.groups[j].e, t = -I.μ[s]:I.ν[s]-1)
+            one_alpha_null =
+                !prod(I.α[e, l+t] for e in I.groups[j].e, t = (-I.μ[s]):(I.ν[s]-1))
             if one_alpha_null
                 fix(f[j, l], 0; force = true)
             else
@@ -611,7 +607,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     end
 
     # Examiner obligation cancelation
-    @variable(model, q[e = 1:I.n_e, P in I.U[e]]; binary = true)
+    @variable(model, q[e=1:I.n_e, P in I.U[e]]; binary = true)
     let ν_min_e = [minimum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
         M(e, P) =
             length(P) * ceil(
@@ -623,7 +619,7 @@ function declare_RSD_jl(I::Instance, model::Model)
         @assert issorted(days_begginings)
         get_t_range(l, s) = begin
             d = searchsortedlast(days_begginings, l)
-            return max(-I.μ[s], l - I.L[d][end]):min(I.ν[s] - 1, l - I.L[d][1])
+            return max(-I.μ[s], l-I.L[d][end]):min(I.ν[s]-1, l-I.L[d][1])
         end
         left_sum(e, P) = sum(
             f[j, l-t] for j = 1:I.n_j if I.λ[e, j] for l in P for
@@ -633,7 +629,7 @@ function declare_RSD_jl(I::Instance, model::Model)
 
         @constraint(
             model,
-            examiner_obligation_cancelation[e = 1:I.n_e, P in I.U[e]],
+            examiner_obligation_cancelation[e=1:I.n_e, P in I.U[e]],
             prod(I.α[e, P]) * left_sum(e, P) <= M(e, P) * q[e, P]
         )
     end
@@ -644,17 +640,17 @@ function declare_RSD_jl(I::Instance, model::Model)
         @constraint(
             model,
             group_one_exam[
-                s in (s for s = 1:I.n_s if I.ν[s] > 1),
+                s in (s for s = 1:I.n_s if I.ν[s]>1),
                 j in I.J[s],
-                d = 1:I.n_d,
-                l in I.L[d][1:end-(I.ν[s]-1)],
+                d=1:I.n_d,
+                l in I.L[d][1:(end-(I.ν[s]-1))],
             ],
-            sum(f[j, l+t] for t = 1:I.ν[s]-1) <= M * (1 - f[j, l])
+            sum(f[j, l+t] for t = 1:(I.ν[s]-1)) <= M * (1 - f[j, l])
         )
     end
 
     # Examiner lunch break 1
-    @variable(model, b[e = 1:I.n_e, l in vcat(I.V...)], binary = true)
+    @variable(model, b[e=1:I.n_e, l in vcat(I.V...)], binary = true)
     let
         μ_max_e = [maximum(I.μ[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
         ν_max_e = [maximum(I.ν[I.groups[j].s] for j = 1:I.n_j if I.λ[e, j]) for e = 1:I.n_e]
@@ -663,13 +659,13 @@ function declare_RSD_jl(I::Instance, model::Model)
 
         @constraint(
             model,
-            examiner_lunch_break_1[e = 1:I.n_e, d = 1:I.n_d, l in I.V[d]],
+            examiner_lunch_break_1[e=1:I.n_e, d=1:I.n_d, l in I.V[d]],
             sum(
                 f[j, l+t] for j = 1:I.n_e if I.λ[e, j] for t =
-                    max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
-                        I.L[d][end] - l,
-                        I.μ[I.groups[j].s] + I.τ_lun - 1,
-                    );
+                    max(
+                        I.L[d][1]-l,
+                        -I.ν[I.groups[j].s]+1,
+                    ):min(I.L[d][end]-l, I.μ[I.groups[j].s]+I.τ_lun-1);
                 init = 0,
             ) + sum(
                 (l <= l_tilde <= min(I.L[d][end], l + I.τ_lun - 1)) * (1 - q[e, P]) for
@@ -682,7 +678,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Examiner lunch break 2
     @constraint(
         model,
-        examiner_lunch_break_2[e = 1:I.n_e, d = 1:I.n_d],
+        examiner_lunch_break_2[e=1:I.n_e, d=1:I.n_d],
         sum(b[e, l] for l in I.V[d]; init = 0) >= 1
     )
 
@@ -700,57 +696,54 @@ function declare_RSD_jl(I::Instance, model::Model)
 
         @constraint(
             model,
-            group_switch_break[j = 1:I.n_j, d = 1:I.n_d, l in I.L[d]],
+            group_switch_break[j=1:I.n_j, d=1:I.n_d, l in I.L[d]],
             sum(
-                f[k, l+t] for k = 1:I.n_j if k != j && I.σ[j, k] for t =
-                    0:min(
-                        I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
-                        I.L[d][end] - l,
-                    );
+                f[k, l+t] for k = 1:I.n_j if k != j && I.σ[j, k] for
+                t = 0:min(I.ν[I.groups[j].s]-1+I.τ_swi+I.μ[I.groups[k].s], I.L[d][end]-l);
                 init = 0,
             ) <= M[j] * (1 - f[j, l])
         )
     end
 
     # Examiner max days 1 and max exams
-    @variable(model, v[e = 1:I.n_e, d = 1:I.n_d], binary = true)
+    @variable(model, v[e=1:I.n_e, d=1:I.n_d], binary = true)
     let
         M(d) = length(I.L[d])
         @constraint(
             model,
-            examiner_max_days_1_and_max_exams[d = 1:I.n_d, e = 1:I.n_e],
+            examiner_max_days_1_and_max_exams[d=1:I.n_d, e=1:I.n_e],
             sum(f[j, l] for j = 1:I.n_j if I.λ[e, j] for l in I.L[d]; init = 0) <=
             I.ζ[e] * v[e, d]
         )
     end
 
     # Examiner max days 2 and 3
-    @variable(model, w[e = 1:I.n_e] >= 0)
+    @variable(model, w[e=1:I.n_e] >= 0)
     @constraint(
         model,
-        examiner_max_days_2_1[e = 1:I.n_e],
+        examiner_max_days_2_1[e=1:I.n_e],
         sum(v[e, d] for d = 1:I.n_d) <= 1 + w[e]
     )
-    @constraint(model, examiner_max_days_2_2[e = 1:I.n_e], 1 + w[e] <= I.κ[e])
+    @constraint(model, examiner_max_days_2_2[e=1:I.n_e], 1 + w[e] <= I.κ[e])
 
     # Exam grouped 1
-    @variable(model, R[e = 1:I.n_e, d = 1:I.n_d])
+    @variable(model, R[e=1:I.n_e, d=1:I.n_d])
     @constraint(
         model,
-        exam_grouped_1[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        exam_grouped_1[j=1:I.n_j, e in I.groups[j].e, d=1:I.n_d, l in I.L[d]],
         R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
 
     # Exam grouped 2
-    @variable(model, r[e = 1:I.n_e, d = 1:I.n_d])
+    @variable(model, r[e=1:I.n_e, d=1:I.n_d])
     @constraint(
         model,
-        exam_grouped_2[j = 1:I.n_j, e in I.groups[j].e, d = 1:I.n_d, l in I.L[d]],
+        exam_grouped_2[j=1:I.n_j, e in I.groups[j].e, d=1:I.n_d, l in I.L[d]],
         r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
     )
 
     # Exam grouped 3
-    @constraint(model, exam_grouped_3[e = 1:I.n_e, d = 1:I.n_d], r[e, d] <= R[e, d])
+    @constraint(model, exam_grouped_3[e=1:I.n_e, d=1:I.n_d], r[e, d] <= R[e, d])
 
 
     # --- Exam related constraints --- #
@@ -758,23 +751,23 @@ function declare_RSD_jl(I::Instance, model::Model)
     fix.(
         [
             f[j, l] for j = 1:I.n_j, d = 1:I.n_d for
-            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][end-I.ν[I.groups[j].s]-1:end])
+            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][(end-I.ν[I.groups[j].s]-1):end])
         ],
         0;
         force = true,
     )
 
     # Exam continuity 3
-    @variable(model, z[j = 1:I.n_j, l = 1:I.n_l] >= 0)
+    @variable(model, z[j=1:I.n_j, l=1:I.n_l] >= 0)
 
     # Exam continuity 1
-    @variable(model, z_tilde[j = 1:I.n_j, l = 1:I.n_l], binary = true)
+    @variable(model, z_tilde[j=1:I.n_j, l=1:I.n_l], binary = true)
     @constraint(
         model,
         exam_continuity_1_1[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         sum(1 - f[j, l-t] for t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s]); init = 0) <=
         I.ρ[I.groups[j].s] * (1 - z_tilde[j, l])
@@ -783,8 +776,8 @@ function declare_RSD_jl(I::Instance, model::Model)
         model,
         exam_continuity_1_2[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l] + z_tilde[j, l]
     )
@@ -794,8 +787,8 @@ function declare_RSD_jl(I::Instance, model::Model)
         model,
         exam_continuity_2[
             j in 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ν[I.groups[j].s]:I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]],
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ν[I.groups[j].s]):(I.ρ[I.groups[j].s]*I.ν[I.groups[j].s])],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l]
     )
@@ -807,13 +800,12 @@ function declare_RSD_jl(I::Instance, model::Model)
         @constraint(
             model,
             exam_break_min_duration[
-                j = 1:I.n_j,
-                d = 1:I.n_d,
-                l in I.L[d][1+I.ν[I.groups[j].s]:end],
+                j=1:I.n_j,
+                d=1:I.n_d,
+                l in I.L[d][(1+I.ν[I.groups[j].s]):end],
             ],
             sum(
-                f[j, l+t] for
-                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]) - 1);
+                f[j, l+t] for t = 0:min(I.L[d][end]-l, max(I.τ_seq, I.μ[I.groups[j].s])-1);
                 init = 0,
             ) <= M[I.groups[j].s] * (1 + f[j, l] - f[j, l-I.ν[I.groups[j].s]])
         )
@@ -823,9 +815,9 @@ function declare_RSD_jl(I::Instance, model::Model)
     @constraint(
         model,
         exam_break_series_end[
-            j = 1:I.n_j,
-            d = 1:I.n_d,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            j=1:I.n_j,
+            d=1:I.n_d,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         f[j, l] <=
         I.ρ[I.groups[j].s] -
@@ -835,22 +827,22 @@ function declare_RSD_jl(I::Instance, model::Model)
 
     # --- Room related constraints --- #
     # Room occupation 1
-    @variable(model, h[j = 1:I.n_j, l = 1:I.n_l], binary = true)
+    @variable(model, h[j=1:I.n_j, l=1:I.n_l], binary = true)
     let
         M = [I.ν[s] + max(I.τ_seq, I.τ_room) - 1 + I.μ[s] + 1 for s = 1:I.n_s]
 
         @constraint(
             model,
             room_occupation_1[
-                j = 1:I.n_j,
-                d = 1:I.n_d,
-                l in I.L[d][I.μ[I.groups[j].s]+1:end-I.ν[I.groups[j].s]],
+                j=1:I.n_j,
+                d=1:I.n_d,
+                l in I.L[d][(I.μ[I.groups[j].s]+1):(end-I.ν[I.groups[j].s])],
             ],
             sum(
                 1 - h[j, l+t] for t =
-                    -I.μ[I.groups[j].s]:min(
-                        I.L[d][end] - l,
-                        I.ν[I.groups[j].s] + max(I.τ_seq, I.τ_room) - 1,
+                    (-I.μ[I.groups[j].s]):min(
+                        I.L[d][end]-l,
+                        I.ν[I.groups[j].s]+max(I.τ_seq, I.τ_room)-1,
                     );
                 init = 0,
             ) <= M[I.groups[j].s] * (1 - f[j, l])
@@ -860,7 +852,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[room_type in keys(I.room_type_data), l = 1:I.n_l],
+        room_occupation_2[room_type in keys(I.room_type_data), l=1:I.n_l],
         sum(
             h[j, l] for s in I.room_type_data[room_type]["subjects"] for j in I.J[s];
             init = 0,
@@ -869,7 +861,7 @@ function declare_RSD_jl(I::Instance, model::Model)
 
 
     # --- Student related constraints --- #
-    @variable(model, g[i = 1:I.n_i, j = 1:I.n_j, l = 1:I.n_l; I.γ[i, j]], binary = true)
+    @variable(model, g[i=1:I.n_i, j=1:I.n_j, l=1:I.n_l; I.γ[i, j]], binary = true)
 
     # Subjects that student i has to take, classified by preparation and presentation time
     S_stu_ord = [Dict{Tuple{Int,Int},Vector{Int}}() for i = 1:I.n_i]
@@ -890,9 +882,9 @@ function declare_RSD_jl(I::Instance, model::Model)
             ((mu, nu), value) in S_stu_ord[i],
             s in value,
             d = 1:I.n_d,
-            l in I.L[d][1+mu:end-(nu-1)]
+            l in I.L[d][(1+mu):(end-(nu-1))]
 
-            RHS = prod(I.θ[i, l-mu:l+nu-1])
+            RHS = prod(I.θ[i, (l-mu):(l+nu-1)])
             if !RHS
                 valid_j = [j for j in I.J[s] if I.γ[i, j]]
                 fix.(g[i, valid_j, l], 0; force = true)
@@ -914,7 +906,7 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i = 1:I.n_i, l = 1:I.n_l],
+        student_one_exam_1[i=1:I.n_i, l=1:I.n_l],
         sum(g[i, j, l] for j = 1:I.n_j if I.γ[i, j]; init = 0) <= 1
     )
 
@@ -933,14 +925,14 @@ function declare_RSD_jl(I::Instance, model::Model)
         @constraint(
             model,
             student_one_exam_2[
-                i = 1:I.n_i,
+                i=1:I.n_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
-                d = 1:I.n_d,
+                d=1:I.n_d,
                 l in I.L[d],
             ],
             sum(
                 g[i, k, l+t] for k = 1:I.n_j if I.γ[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l);
+                t = 1:min(nu-1+I.τ_stu+I.μ[I.groups[k].s], I.L[d][end]-l);
                 init = 0,
             ) <=
             M(i, nu, d, l) *
@@ -951,21 +943,21 @@ function declare_RSD_jl(I::Instance, model::Model)
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        student_max_exams[i=1:I.n_i, d=1:I.n_d],
         sum(g[i, j, l] for j = 1:I.n_j if I.γ[i, j] for l in I.L[d]; init = 0) <= I.ξ
     )
 
     # Exam needed
     @constraint(
         model,
-        exam_needed[j = 1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
+        exam_needed[j=1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
         sum(g[i, j, l] for l = 1:I.n_l) == 1
     )
 
     # Student hard constraints link
     @constraint(
         model,
-        student_hard_constraints_link[j = 1:I.n_j, l = 1:I.n_l],
+        student_hard_constraints_link[j=1:I.n_j, l=1:I.n_l],
         sum(g[i, j, l] for i in (i for i = 1:I.n_i if I.γ[i, j]); init = 0) /
         I.η[I.groups[j].s] == f[j, l]
     )
@@ -1025,21 +1017,22 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     is_P_valid(P) = (sum(l in l_range for l in P) > 0)
 
     # --- Main decision variables --- #
-    @variable(model, f[j in valid_j, l = l_range], binary = true)
+    @variable(model, f[j in valid_j, l=l_range], binary = true)
 
 
     # --- Examiner related constraints --- #
     # Group availability
     let
-        M(j, s) = length(I.groups[j].e) * length(-I.μ[s]:I.ν[s]-1)
+        M(j, s) = length(I.groups[j].e) * length((-I.μ[s]):(I.ν[s]-1))
 
         sum_ids = Set{Tuple{Int,Int}}()
         for s = 1:I.n_s,
             j in (j for j in I.J[s] if is_j_valid[j]),
             d in d_range,
-            l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+            l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))]
 
-            one_alpha_null = !prod(I.α[e, l+t] for e in I.groups[j].e, t = -I.μ[s]:I.ν[s]-1)
+            one_alpha_null =
+                !prod(I.α[e, l+t] for e in I.groups[j].e, t = (-I.μ[s]):(I.ν[s]-1))
             if one_alpha_null
                 fix(f[j, l], 0; force = true)
             else
@@ -1066,7 +1059,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         get_t_range(l, s) = begin
             d = searchsortedlast(days_begginings, l)
             !(d in d_range) && return 0:-1
-            return max(-I.μ[s], l - I.L[d][end]):min(I.ν[s] - 1, l - I.L[d][1])
+            return max(-I.μ[s], l-I.L[d][end]):min(I.ν[s]-1, l-I.L[d][1])
         end
         left_sum(e, P) = sum(
             f[j, l-t] for j in valid_j if I.λ[e, j] for l in P for
@@ -1090,12 +1083,12 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         @constraint(
             model,
             group_one_exam[
-                s in (s for s = 1:I.n_s if I.ν[s] > 1),
+                s in (s for s = 1:I.n_s if I.ν[s]>1),
                 j in (j for j in I.J[s] if is_j_valid[j]),
-                d = d_range,
-                l in I.L[d][1:end-(I.ν[s]-1)],
+                d=d_range,
+                l in I.L[d][1:(end-(I.ν[s]-1))],
             ],
-            sum(f[j, l+t] for t = 1:I.ν[s]-1) <= M * (1 - f[j, l])
+            sum(f[j, l+t] for t = 1:(I.ν[s]-1)) <= M * (1 - f[j, l])
         )
     end
 
@@ -1115,13 +1108,13 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
         @constraint(
             model,
-            examiner_lunch_break_1[e in valid_e, d = d_range, l in I.V[d]],
+            examiner_lunch_break_1[e in valid_e, d=d_range, l in I.V[d]],
             sum(
                 f[j, l+t] for j in valid_j if I.λ[e, j] for t =
-                    max(I.L[d][1] - l, -I.ν[I.groups[j].s] + 1):min(
-                        I.L[d][end] - l,
-                        I.μ[I.groups[j].s] + I.τ_lun - 1,
-                    );
+                    max(
+                        I.L[d][1]-l,
+                        -I.ν[I.groups[j].s]+1,
+                    ):min(I.L[d][end]-l, I.μ[I.groups[j].s]+I.τ_lun-1);
                 init = 0,
             ) + sum(
                 (l <= l_tilde <= min(I.L[d][end], l + I.τ_lun - 1)) * (1 - q[e, P]) for
@@ -1134,7 +1127,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Examiner lunch break 2
     @constraint(
         model,
-        examiner_lunch_break_2[e in valid_e, d = d_range],
+        examiner_lunch_break_2[e in valid_e, d=d_range],
         sum(b[e, l] for l in I.V[d]; init = 0) >= 1
     )
 
@@ -1152,25 +1145,22 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
         @constraint(
             model,
-            group_switch_break[j in valid_j, d = d_range, l in I.L[d]],
+            group_switch_break[j in valid_j, d=d_range, l in I.L[d]],
             sum(
-                f[k, l+t] for k in valid_j if k != j && I.σ[j, k] for t =
-                    0:min(
-                        I.ν[I.groups[j].s] - 1 + I.τ_swi + I.μ[I.groups[k].s],
-                        I.L[d][end] - l,
-                    );
+                f[k, l+t] for k in valid_j if k != j && I.σ[j, k] for
+                t = 0:min(I.ν[I.groups[j].s]-1+I.τ_swi+I.μ[I.groups[k].s], I.L[d][end]-l);
                 init = 0,
             ) <= M[j] * (1 - f[j, l])
         )
     end
 
     # Examiner max days 1 and max exams
-    @variable(model, v[e in valid_e, d = d_range], binary = true)
+    @variable(model, v[e in valid_e, d=d_range], binary = true)
     let
         M(d) = length(I.L[d])
         @constraint(
             model,
-            examiner_max_days_1_and_max_exams[d = d_range, e in valid_e],
+            examiner_max_days_1_and_max_exams[d=d_range, e in valid_e],
             sum(f[j, l] for j in valid_j if I.λ[e, j] for l in I.L[d]; init = 0) <=
             I.ζ[e] * v[e, d]
         )
@@ -1186,18 +1176,18 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     @constraint(model, examiner_max_days_2_2[e in valid_e], 1 + w[e] <= SplitI.κ[e])
 
     # Exam grouped 1
-    @variable(model, R[e in valid_e, d = d_range])
+    @variable(model, R[e in valid_e, d=d_range])
     @constraint(
         model,
-        exam_grouped_1[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
+        exam_grouped_1[j in valid_j, e in I.groups[j].e, d=d_range, l in I.L[d]],
         R[e, d] >= l + (I.L[d][1] - l) * (1 - f[j, l])
     )
 
     # Exam grouped 2
-    @variable(model, r[e in valid_e, d = d_range])
+    @variable(model, r[e in valid_e, d=d_range])
     @constraint(
         model,
-        exam_grouped_2[j in valid_j, e in I.groups[j].e, d = d_range, l in I.L[d]],
+        exam_grouped_2[j in valid_j, e in I.groups[j].e, d=d_range, l in I.L[d]],
         r[e, d] <= l + (I.L[d][end] - l) * (1 - f[j, l])
     )
 
@@ -1210,23 +1200,23 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     fix.(
         [
             f[j, l] for j in valid_j, d in d_range for
-            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][end-I.ν[I.groups[j].s]-1:end])
+            l in vcat(I.L[d][1:I.μ[I.groups[j].s]], I.L[d][(end-I.ν[I.groups[j].s]-1):end])
         ],
         0;
         force = true,
     )
 
     # Exam continuity 3
-    @variable(model, z[j in valid_j, l = l_range] >= 0)
+    @variable(model, z[j in valid_j, l=l_range] >= 0)
 
     # Exam continuity 1
-    @variable(model, z_tilde[j in valid_j, l = l_range], binary = true)
+    @variable(model, z_tilde[j in valid_j, l=l_range], binary = true)
     @constraint(
         model,
         exam_continuity_1_1[
             j in valid_j,
-            d = d_range,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            d=d_range,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         sum(1 - f[j, l-t] for t in I.ν[I.groups[j].s] * (1:I.ρ[I.groups[j].s]); init = 0) <=
         I.ρ[I.groups[j].s] * (1 - z_tilde[j, l])
@@ -1235,8 +1225,8 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         model,
         exam_continuity_1_2[
             j in valid_j,
-            d = d_range,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            d=d_range,
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l] + z_tilde[j, l]
     )
@@ -1246,8 +1236,8 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         model,
         exam_continuity_2[
             j in valid_j,
-            d = d_range,
-            l in I.L[d][1+I.ν[I.groups[j].s]:I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]],
+            d=d_range,
+            l in I.L[d][(1+I.ν[I.groups[j].s]):(I.ρ[I.groups[j].s]*I.ν[I.groups[j].s])],
         ],
         f[j, l-I.ν[I.groups[j].s]] <= f[j, l] + z[j, l]
     )
@@ -1261,11 +1251,10 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             exam_break_min_duration[
                 j in valid_j,
                 d in d_range,
-                l in I.L[d][1+I.ν[I.groups[j].s]:end],
+                l in I.L[d][(1+I.ν[I.groups[j].s]):end],
             ],
             sum(
-                f[j, l+t] for
-                t = 0:min(I.L[d][end] - l, max(I.τ_seq, I.μ[I.groups[j].s]) - 1);
+                f[j, l+t] for t = 0:min(I.L[d][end]-l, max(I.τ_seq, I.μ[I.groups[j].s])-1);
                 init = 0,
             ) <= M[I.groups[j].s] * (1 + f[j, l] - f[j, l-I.ν[I.groups[j].s]])
         )
@@ -1277,7 +1266,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
         exam_break_series_end[
             j in valid_j,
             d in d_range,
-            l in I.L[d][1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]:end],
+            l in I.L[d][(1+I.ρ[I.groups[j].s]*I.ν[I.groups[j].s]):end],
         ],
         f[j, l] <=
         I.ρ[I.groups[j].s] -
@@ -1287,7 +1276,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
     # --- Room related constraints --- #
     # Room occupation 1
-    @variable(model, h[j in valid_j, l = l_range], binary = true)
+    @variable(model, h[j in valid_j, l=l_range], binary = true)
     let
         M = [I.ν[s] + max(I.τ_seq, I.τ_room) - 1 + I.μ[s] + 1 for s = 1:I.n_s]
 
@@ -1295,14 +1284,14 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             model,
             room_occupation_1[
                 j in valid_j,
-                d = d_range,
-                l in I.L[d][I.μ[I.groups[j].s]+1:end-I.ν[I.groups[j].s]],
+                d=d_range,
+                l in I.L[d][(I.μ[I.groups[j].s]+1):(end-I.ν[I.groups[j].s])],
             ],
             sum(
                 1 - h[j, l+t] for t =
-                    -I.μ[I.groups[j].s]:min(
-                        I.L[d][end] - l,
-                        I.ν[I.groups[j].s] + max(I.τ_seq, I.τ_room) - 1,
+                    (-I.μ[I.groups[j].s]):min(
+                        I.L[d][end]-l,
+                        I.ν[I.groups[j].s]+max(I.τ_seq, I.τ_room)-1,
                     );
                 init = 0,
             ) <= M[I.groups[j].s] * (1 - f[j, l])
@@ -1312,7 +1301,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Room occupation 2
     @constraint(
         model,
-        room_occupation_2[room_type in keys(I.room_type_data), l = l_range],
+        room_occupation_2[room_type in keys(I.room_type_data), l=l_range],
         sum(
             h[j, l] for s in I.room_type_data[room_type]["subjects"] for
             j in I.J[s] if is_j_valid[j];
@@ -1322,11 +1311,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
 
 
     # --- Student related constraints --- #
-    @variable(
-        model,
-        g[i = 1:I.n_i, j = 1:I.n_j, l = l_range; is_ij_valid[i, j]],
-        binary = true
-    )
+    @variable(model, g[i=1:I.n_i, j=1:I.n_j, l=l_range; is_ij_valid[i, j]], binary = true)
 
     # Subjects that student i has to take, classified by preparation and presentation time
     S_stu_ord = [Dict{Tuple{Int,Int},Vector{Int}}() for i = 1:I.n_i]
@@ -1345,9 +1330,9 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             ((mu, nu), value) in S_stu_ord[i],
             s in value,
             d in d_range,
-            l in I.L[d][1+mu:end-(nu-1)]
+            l in I.L[d][(1+mu):(end-(nu-1))]
 
-            RHS = prod(I.θ[i, l-mu:l+nu-1])
+            RHS = prod(I.θ[i, (l-mu):(l+nu-1)])
             if !RHS
                 valid_j = [j for j in I.J[s] if is_ij_valid[i, j]]
                 fix.(g[i, valid_j, l], 0; force = true)
@@ -1369,7 +1354,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i in valid_i, l = l_range],
+        student_one_exam_1[i in valid_i, l=l_range],
         sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j]; init = 0) <= 1
     )
 
@@ -1396,12 +1381,12 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
             student_one_exam_2[
                 i in valid_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
-                d = d_range,
+                d=d_range,
                 l in I.L[d],
             ],
             sum(
                 g[i, k, l+t] for k in valid_j if is_ij_valid[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l);
+                t = 1:min(nu-1+I.τ_stu+I.μ[I.groups[k].s], I.L[d][end]-l);
                 init = 0,
             ) <=
             M(i, nu, d, l) * (
@@ -1416,7 +1401,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i in valid_i, d = d_range],
+        student_max_exams[i in valid_i, d=d_range],
         sum(g[i, j, l] for j in valid_j if is_ij_valid[i, j] for l in I.L[d]; init = 0) <=
         I.ξ
     )
@@ -1431,7 +1416,7 @@ function declare_RSD_jl_split(SplitI::SplitInstance, model::Model)
     # Student hard constraints link
     @constraint(
         model,
-        student_hard_constraints_link[j in valid_j, l = l_range],
+        student_hard_constraints_link[j in valid_j, l=l_range],
         sum(g[i, j, l] for i in valid_i if is_ij_valid[i, j]; init = 0) /
         I.η[I.groups[j].s] == f[j, l]
     )
@@ -1484,26 +1469,22 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
 
 
     # --- Main decision variables --- #
-    @variable(
-        model,
-        b[j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; is_jl_valid[j, l]],
-        binary = true
-    )
+    @variable(model, b[j=1:I.n_j, l=1:I.n_l, m=1:I.n_m; is_jl_valid[j, l]], binary = true)
 
 
     # --- Constraints --- #
     # Group inside room
     @constraint(
         model,
-        group_inside_room[l = 1:I.n_l, j in (j for j = 1:I.n_j if is_jl_valid[j, l])],
+        group_inside_room[l=1:I.n_l, j in (j for j = 1:I.n_j if is_jl_valid[j, l])],
         sum(b[j, l, m] for m = 1:I.n_m) == 1
     )
 
     # Room availability
     let
         sum_ids = Set{Tuple{Int,Int,Int}}()
-        for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)], m = 1:I.n_m
-            RHS = I.ψ[m, s] * prod(I.δ[m, l-I.μ[s]:l+I.ν[s]-1])
+        for s = 1:I.n_s, d = 1:I.n_d, l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))], m = 1:I.n_m
+            RHS = I.ψ[m, s] * prod(I.δ[m, (l-I.μ[s]):(l+I.ν[s]-1)])
 
             if !RHS
                 valid_j = [j for j in I.J[s] if is_jl_valid[j, l]]
@@ -1528,19 +1509,18 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
         @constraint(
             model,
             room_group_occupation[
-                j = 1:I.n_j,
-                d = 1:I.n_d,
+                j=1:I.n_j,
+                d=1:I.n_d,
                 l in (l for l in I.L[d] if is_jl_valid[j, l]),
-                k in (k for k = 1:I.n_j if k != j &&
-                      sum(
+                k in (k for k = 1:I.n_j if k!=j&&sum(
                     is_jl_valid[k, l+t] for
-                    t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s))
-                ) > 0),
-                m = 1:I.n_m,
+                    t = 0:min(I.L[d][end]-l, a(I.groups[j].s, I.groups[k].s))
+                )>0),
+                m=1:I.n_m,
             ],
             sum(
                 b[k, l+t, m] for
-                t = 0:min(I.L[d][end] - l, a(I.groups[j].s, I.groups[k].s)) if
+                t = 0:min(I.L[d][end]-l, a(I.groups[j].s, I.groups[k].s)) if
                 is_jl_valid[k, l+t];
                 init = 0,
             ) <= M(I.groups[j].s, I.groups[k].s) * (1 - b[j, l, m])
@@ -1555,17 +1535,15 @@ function declare_RSD_jlm(I::Instance, f_values::Matrix{Bool}, model::Model)
             model,
             room_switch_break[
                 j in 1:I.n_j,
-                d = 1:I.n_d,
+                d=1:I.n_d,
                 l in (l for l in I.L[d] if is_jl_valid[j, l]),
-                m = 1:I.n_m,
+                m=1:I.n_m,
             ],
             sum(
                 b[j, l+I.ν[I.groups[j].s]+t, m_tilde] for m_tilde = 1:I.n_m if m_tilde != m
-                for t =
-                    0:min(
-                        I.L[d][end] - l - I.ν[I.groups[j].s],
-                        I.τ_room + I.μ[I.groups[j].s] - 1,
-                    ) if is_jl_valid[j, l+I.ν[I.groups[j].s]+t];
+                for
+                t = 0:min(I.L[d][end]-l-I.ν[I.groups[j].s], I.τ_room+I.μ[I.groups[j].s]-1) if
+                is_jl_valid[j, l+I.ν[I.groups[j].s]+t];
                 init = 0,
             ) <= M(I.groups[j].s) * (1 - b[j, l, m])
         )
@@ -1602,7 +1580,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     # --- Main decision variables --- #
     @variable(
         model,
-        x[i = 1:I.n_i, j = 1:I.n_j, l = 1:I.n_l, m = 1:I.n_m; is_ijlm_valid[i, j, l, m]],
+        x[i=1:I.n_i, j=1:I.n_j, l=1:I.n_l, m=1:I.n_m; is_ijlm_valid[i, j, l, m]],
         binary = true
     )
 
@@ -1634,9 +1612,9 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
             ((mu, nu), value) in S_stu_ord[i],
             s in value,
             d = 1:I.n_d,
-            l in I.L[d][1+I.μ[s]:end-(I.ν[s]-1)]
+            l in I.L[d][(1+I.μ[s]):(end-(I.ν[s]-1))]
 
-            RHS = prod(I.θ[i, l-mu:l+nu-1])
+            RHS = prod(I.θ[i, (l-mu):(l+nu-1)])
             if !RHS
                 valid_jm =
                     [(j, m) for j in I.J[s], m = 1:I.n_m if is_ijlm_valid[i, j, l, m]]
@@ -1660,7 +1638,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     # Student one exam 1
     @constraint(
         model,
-        student_one_exam_1[i = 1:I.n_i, l = 1:I.n_l],
+        student_one_exam_1[i=1:I.n_i, l=1:I.n_l],
         sum(
             x[i, j, l, m] for j = 1:I.n_j, m = 1:I.n_m if is_ijlm_valid[i, j, l, m];
             init = 0,
@@ -1685,15 +1663,15 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
         @constraint(
             model,
             student_one_exam_2[
-                i = 1:I.n_i,
+                i=1:I.n_i,
                 ((mu, nu), valid_s) in S_stu_ord[i],
-                d = 1:I.n_d,
+                d=1:I.n_d,
                 l in I.L[d],
             ],
             sum(
                 x[i, k, l+t, m] for k = 1:I.n_j if I.γ[i, k] for
-                t = 1:min(nu - 1 + I.τ_stu + I.μ[I.groups[k].s], I.L[d][end] - l),
-                m = 1:I.n_m if is_ijlm_valid[i, k, l+t, m];
+                t = 1:min(nu-1+I.τ_stu+I.μ[I.groups[k].s], I.L[d][end]-l), m = 1:I.n_m if
+                is_ijlm_valid[i, k, l+t, m];
                 init = 0,
             ) <=
             M(i, nu, d, l) * (
@@ -1709,7 +1687,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        student_max_exams[i=1:I.n_i, d=1:I.n_d],
         sum(
             x[i, j, l, m] for
             j = 1:I.n_j, l in I.L[d], m = 1:I.n_m if is_ijlm_valid[i, j, l, m];
@@ -1718,10 +1696,10 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     )
 
     # Student harmonious exams
-    @variable(model, y[i = 1:I.n_i] >= 0)
+    @variable(model, y[i=1:I.n_i] >= 0)
     @constraint(
         model,
-        student_harmonious_exams[i = 1:I.n_i, w = 1:I.n_w],
+        student_harmonious_exams[i=1:I.n_i, w=1:I.n_w],
         sum(
             x[i, j, l, m] for
             j = 1:I.n_j, l in I.Z[w], m = 1:I.n_m if is_ijlm_valid[i, j, l, m];
@@ -1739,9 +1717,9 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     @variable(
         model,
         R_tilde[
-            j = 1:I.n_j,
-            c = 1:I.n_c,
-            d = 1:I.n_d;
+            j=1:I.n_j,
+            c=1:I.n_c,
+            d=1:I.n_d;
             is_jd_valid[j, d] && is_j_multi_class[j] && is_jc_valid[j, c],
         ] <= I.L[d][end]
     )
@@ -1763,9 +1741,9 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     @variable(
         model,
         r_tilde[
-            j = 1:I.n_j,
-            c = 1:I.n_c,
-            d = 1:I.n_d;
+            j=1:I.n_j,
+            c=1:I.n_c,
+            d=1:I.n_d;
             is_jd_valid[j, d] && is_j_multi_class[j] && is_jc_valid[j, c],
         ] >= I.L[d][1]
     )
@@ -1799,7 +1777,7 @@ function declare_RSD_ijlm(I::Instance, b_values::Array{Bool,3}, model::Model)
     # Exam needed
     @constraint(
         model,
-        exam_needed[j = 1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
+        exam_needed[j=1:I.n_j, i in (i for i = 1:I.n_i if I.γ[i, j])],
         sum(
             x[i, j, l, m] for l = 1:I.n_l, m = 1:I.n_m if is_ijlm_valid[i, j, l, m];
             init = 0,
@@ -1842,7 +1820,7 @@ function declare_splitting_MILP(
     model::Model,
 )
     # --- Main decision variables --- #
-    @variable(model, y[exam in exams, d = 1:I.n_d], binary = true)
+    @variable(model, y[exam in exams, d=1:I.n_d], binary = true)
 
     # --- Constraints --- #
     # Exam needed
@@ -1874,7 +1852,7 @@ function declare_splitting_MILP(
 
         @constraint(
             model,
-            group_enough_time[j = 1:I.n_j, d = 1:I.n_d],
+            group_enough_time[j=1:I.n_j, d=1:I.n_d],
             sum(
                 y[exam, d] * exam_length(I.groups[exam[2]].s) for
                 exam in exams if j == exam[2];
@@ -1884,23 +1862,24 @@ function declare_splitting_MILP(
     end
 
     # Examiner enough time
-    @variable(model, v[j = 1:I.n_j, d = 1:I.n_d], binary = true) # j has an exam on d implies v[j, d] == 1
+    @variable(model, v[j=1:I.n_j, d=1:I.n_d], binary = true) # j has an exam on d implies v[j, d] == 1
     @constraint(
         model,
-        group_has_exam[j = 1:I.n_j, d = 1:I.n_d],
+        group_has_exam[j=1:I.n_j, d=1:I.n_d],
         sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) <=
         sum(I.γ[:, j]) * v[j, d]
     )
-    @variable(model, t[e = 1:I.n_e, P in I.U[e]], binary = true)
+    @variable(model, t[e=1:I.n_e, P in I.U[e]], binary = true)
     let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
         @constraint(
             model,
-            examiner_enough_time[e = 1:I.n_e, d = 1:I.n_d],
+            examiner_enough_time[e=1:I.n_e, d=1:I.n_d],
             sum(
                 y[exam, d] * exam_length(I.groups[exam[2]].s) for
                 exam in exams if I.λ[e, exam[2]];
                 init = 0,
-            ) - I.τ_seq + I.τ_swi * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
+            ) - I.τ_seq +
+            max(0, I.τ_swi - I.τ_seq) * (sum(v[j, d] for j = 1:I.n_j if I.λ[e, j]) - 1) <=
             fill_rate * (
                 sum(I.α[e, l] for l in I.L[d]) + sum(
                     prod(I.α[e, l] for l in P) *
@@ -1913,10 +1892,10 @@ function declare_splitting_MILP(
     end
 
     # Examiner max exams
-    @variable(model, z[e = 1:I.n_e, d = 1:I.n_d], binary = true)
+    @variable(model, z[e=1:I.n_e, d=1:I.n_d], binary = true)
     @constraint(
         model,
-        examiner_max_exams[e = 1:I.n_e, d = 1:I.n_d],
+        examiner_max_exams[e=1:I.n_e, d=1:I.n_d],
         sum(
             y[exam, d] / I.η[I.groups[exam[2]].s] for
             exam in exams if e in I.groups[exam[2]].e;
@@ -1925,17 +1904,13 @@ function declare_splitting_MILP(
     )
 
     # Examiner max days
-    @constraint(
-        model,
-        examiner_max_days[e = 1:I.n_e],
-        sum(z[e, d] for d = 1:I.n_d) <= I.κ[e]
-    )
+    @constraint(model, examiner_max_days[e=1:I.n_e], sum(z[e, d] for d = 1:I.n_d) <= I.κ[e])
 
     # Rooms enough time
     let exam_length(s) = (I.ν[s] + (I.τ_seq + I.μ[s]) / I.ρ[s]) / I.η[s]
         @constraint(
             model,
-            rooms_enough_time[room_type in keys(I.room_type_data), d = 1:I.n_d],
+            rooms_enough_time[room_type in keys(I.room_type_data), d=1:I.n_d],
             sum(
                 y[exam, d] * exam_length(I.groups[exam[2]].s) for exam in exams if
                 I.groups[exam[2]].s in I.room_type_data[room_type]["subjects"];
@@ -1947,10 +1922,10 @@ function declare_splitting_MILP(
     end
 
     # Feasible amount of students each day for exams with multiple simultaneous students
-    @variable(model, r[j = 1:I.n_j, d = 1:I.n_d] >= 0, integer = true)
+    @variable(model, r[j=1:I.n_j, d=1:I.n_d] >= 0, integer = true)
     @constraint(
         model,
-        group_feasible_amount_students[j = 1:I.n_j, d = 1:I.n_d],
+        group_feasible_amount_students[j=1:I.n_j, d=1:I.n_d],
         sum(y[exam, d] for exam in exams if exam[2] == j; init = 0) ==
         r[j, d] * I.η[I.groups[j].s]
     )
@@ -1959,7 +1934,7 @@ function declare_splitting_MILP(
     let exam_length(s) = I.ν[s] + I.μ[s] + I.τ_stu
         @constraint(
             model,
-            student_enough_time[i = 1:I.n_i, d = 1:I.n_d],
+            student_enough_time[i=1:I.n_i, d=1:I.n_d],
             sum(
                 y[exam, d] * exam_length(I.groups[exam[2]].s) for
                 exam in exams if i == exam[1];
@@ -1971,7 +1946,7 @@ function declare_splitting_MILP(
     # Student max exams
     @constraint(
         model,
-        student_max_exams[i = 1:I.n_i, d = 1:I.n_d],
+        student_max_exams[i=1:I.n_i, d=1:I.n_d],
         sum(y[exam, d] for exam in exams if exam[1] == i; init = 0) <= I.ξ
     )
 
@@ -1979,24 +1954,24 @@ function declare_splitting_MILP(
     @variable(model, p[split in 1:n_splits] >= 0)
     @constraint(
         model,
-        split_harmonious_exams_1[split = 1:n_splits],
+        split_harmonious_exams_1[split=1:n_splits],
         p[split] >=
         sum(y[exam, d] for exam in exams, d in days_split[split]) -
         length(exams) * length(days_split[split]) / I.n_d
     )
     @constraint(
         model,
-        split_harmonious_exams_2[split = 1:n_splits],
+        split_harmonious_exams_2[split=1:n_splits],
         p[split] >=
         length(exams) * length(days_split[split]) / I.n_d -
         sum(y[exam, d] for exam in exams, d in days_split[split])
     )
 
     # Student harmonious exams
-    @variable(model, q[i = 1:I.n_i, split = 1:n_splits])
+    @variable(model, q[i=1:I.n_i, split=1:n_splits])
     @constraint(
         model,
-        student_harmonious_exams_1[i = 1:I.n_i, split = 1:n_splits],
+        student_harmonious_exams_1[i=1:I.n_i, split=1:n_splits],
         q[i, split] >=
         sum(
             y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
@@ -2005,7 +1980,7 @@ function declare_splitting_MILP(
     )
     @constraint(
         model,
-        student_harmonious_exams_2[i = 1:I.n_i, split = 1:n_splits],
+        student_harmonious_exams_2[i=1:I.n_i, split=1:n_splits],
         q[i, split] >=
         floor(I.ε[i] * length(days_split[split]) / I.n_d) - sum(
             y[exam, d] for exam in exams if exam[1] == i for d in days_split[split];
